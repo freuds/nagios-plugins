@@ -19,6 +19,7 @@
 
 set -eu
 [ -n "${DEBUG:-}" ] && set -x
+srcdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ${perl:-perl} -e 'use Net::ZooKeeper' &>/dev/null && zookeeper_built="true" || zookeeper_built=""
 
@@ -30,32 +31,54 @@ is_zookeeper_built(){
     fi
 }
 
+# This is a relatively expensive function do not overuse this
 isExcluded(){
-    local prog="$1" 
+    local prog="$1"
     [[ "$prog" =~ ^\* ]] && return 0
-    [[ "$prog" = "check_puppet.rb" ]] && continue
+    [[ "$prog" =~ ^\.\/\. ]] && return 0
+    [[ "$prog" =~ ^\.[[:alnum:]] ]] && return 0
+    [[ "$prog" = "check_puppet.rb" ]] && return 0
     # temporarily disable check_kafka.pl check as there is an upstream library breakage
-    [[ "$prog" = "check_kafka.pl" ]] && return 0
+    # library bug is not auto fixed in Makefile due to Mac's new System Integrity Protection
+    is_mac && [[ "$prog" =~ "check_kafka.pl" ]] && return 0
+    [[ "$prog" =~ *TODO* ]] && return 0
     # Kafka module requires Perl >= 5.10, skip when running tests on 5.8 for CentOS 5 for which everything else works
-    if [ "$PERL_MAJOR_VERSION" = "5.8" ]; then
-        [ "$prog" = "check_kafka.pl" ] && { echo "skipping check_kafka.pl on Perl 5.8 since the Kafka CPAN module requires Perl >= 5.10"; return 0; }
-        [[ "$prog" =~ check_mongodb_.*.pl ]] && { echo "skipping check_mongodb_*.pl on Perl 5.8 since the MongoDB module requires Type::Tiny::XS which breaks for some unknown reason"; return 0; }
+    if [ "${PERL_MAJOR_VERSION:-}" = "5.8" ]; then
+        if [ "$prog" = "check_kafka.pl" ]; then
+            echo
+            echo "skipping check_kafka.pl on Perl 5.8 since the Kafka CPAN module requires Perl >= 5.10"
+            echo
+            return 0
+        fi
+        if [[ "$prog" =~ check_mongodb_.*.pl ]]; then
+            echo
+            echo "skipping check_mongodb_*.pl on Perl 5.8 since the MongoDB module requires Type::Tiny::XS which breaks for some unknown reason"
+            echo
+            return 0
+        fi
     fi
-    grep -q "use[[:space:]]\+utils" "$prog" && { echo "skipping $prog due to use of utils.pm from standard nagios plugins collection which may not be available"; return 0; }
-    # ignore zookeeper plugins if Net::ZooKeeper module is not available
-    if grep -q "Net::ZooKeeper" "$prog" && ! is_zookeeper_built; then
-        echo "skipping $prog due to Net::ZooKeeper dependency not having been built (do 'make zookeeper' if intending to use this plugin)"
+    if grep -q "use[[:space:]]\+utils" "$prog"; then
+        echo
+        echo "skipping $prog due to use of utils.pm from standard nagios plugins collection which may not be available"
+        echo
         return 0
     fi
-    if [ -n "${NO_GIT:-}" ]; then
-        return 1
-    elif which git &>/dev/null; then
+    # ignore zookeeper plugins if Net::ZooKeeper module is not available
+    # [u] is a clever hack to not skip myself
+    if grep -q "[u]se.*Net::ZooKeeper.*;" "$prog" && ! is_zookeeper_built; then
+        echo
+        echo "skipping $prog due to Net::ZooKeeper dependency not having been built (do 'make zookeeper' if intending to use this plugin)"
+        echo
+        return 0
+    fi
+    [ -n "${NO_GIT:-}" ] && return 1
+    # this external git check is expensive, skip it when in CI as using fresh git checkouts
+    is_CI && return 1
+    if which git &>/dev/null; then
         commit="$(git log "$prog" | head -n1 | grep 'commit')"
         if [ -z "$commit" ]; then
             return 0
         fi
-        return 1
-    else
-        return 0
     fi
+    return 1
 }

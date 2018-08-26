@@ -14,26 +14,26 @@
    system. May be remotely executed via any of the standard remote nagios
    execution mechanisms"""
 
+import os
+import re
+import sys
+from optparse import OptionParser
+try:
+    from subprocess import Popen, PIPE, STDOUT
+except ImportError:
+    print "Failed to import subprocess module.",
+    print "Perhaps you are using a version of python older than 2.4?"
+    sys.exit(4)
+
 __author__  = "Hari Sekhon"
 __title__   = "Nagios Plugin for 3ware RAID"
-__version__ = "1.1"
+__version__ = '1.1.1'
 
 # Standard Nagios return codes
 OK       = 0
 WARNING  = 1
 CRITICAL = 2
 UNKNOWN  = 3
-
-import os
-import re
-import sys
-try:
-    from subprocess import Popen, PIPE, STDOUT
-except ImportError:
-    print "Failed to import subprocess module.",
-    print "Perhaps you are using a version of python older than 2.4?"
-    sys.exit(CRITICAL)
-from optparse import OptionParser
 
 SRCDIR = os.path.dirname(sys.argv[0])
 
@@ -43,7 +43,7 @@ def end(status, message, disks=False):
     arg as the message to output"""
 
     check = "RAID"
-    if disks == True:
+    if disks:
         check = "DISKS"
     if status == OK:
         print "%s OK: %s" % (check, message)
@@ -90,7 +90,7 @@ def _set_twcli_binary(path=None):
 
 def run(cmd):
     """runs a system command and returns stripped output"""
-    if cmd == "" or cmd == None:
+    if not cmd:
         end(UNKNOWN, "internal python error - " \
                    + "no cmd supplied for 3ware utility")
     try:
@@ -111,7 +111,7 @@ def run(cmd):
         end(UNKNOWN, "unable to communicate with 3ware utility - %s" % error)
 
 
-    if stdout == None or stdout == "":
+    if not stdout:
         end(UNKNOWN, "No output from 3ware utility")
 
     output = str(stdout).split("\n")
@@ -134,10 +134,10 @@ def test_all(verbosity, warn_true=False, no_summary=False, show_drives=False):
 
     array_result, array_message = test_arrays(verbosity, warn_true, no_summary)
 
-    if array_result != OK and not show_drives:
-        return array_result, array_message
-
     drive_result, drive_message = test_drives(verbosity, warn_true, no_summary)
+
+    if array_result != OK and drive_result == OK and not show_drives:
+        return array_result, array_message
 
     if drive_result > array_result:
         result = drive_result
@@ -240,7 +240,7 @@ def test_drives(verbosity, warn_true=False, no_summary=False):
     controllers = []
     for line in lines:
         parts = line.split()
-        if len(parts):
+        if parts:
             controllers.append(parts[0])
 
     status = OK

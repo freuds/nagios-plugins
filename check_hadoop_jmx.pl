@@ -11,11 +11,21 @@
 
 our $DESCRIPTION = "Nagios Plugin to parse metrics from a given Hadoop daemon's /jmx page
 
-Specify ports depending on which daemon you're trying to get JMX from: HDFS NameNode = 50070 / DataNode = 50075, HBase Master = 60010 / RegionServer = 60030 (for some reason on Hortonworks Sandbox 2.3 the ports for HBase are instead 16010 and 16030)
+Specify ports depending on which daemon you're trying to get JMX from: HDFS NameNode = 50070 / DataNode = 50075 (1022 if Kerberized), HBase Master = 16010 / RegionServer = 16030 (60010 or 60301 on older HBase versions <= 0.96)
 
 Make sure you specify --mbean in prod, leave it out with --all-metrics and -vv only for exploring what is available. Nagios has a char limit and will truncate the output, and the perfdata at the end would be lost.
 
-Tested on Hadoop 2.6 / 2.7 NameNode & DataNode, HBase 0.98 Master & RegionServer on Hortonworks HDP 2.2 & HDP 2.3, Apache Hadoop 2.5.2, 2.6.4, 2.7.2
+See metrics documentation for detailed description of important metrics to query:
+
+https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/Metrics.html
+https://hbase.apache.org/metrics.html
+https://hbase.apache.org/book.html#hbase_metrics
+
+Tested on Hadoop NameNode & DataNode and HBase Master & RegionServer on:
+
+Hortonworks HDP 2.2 / 2.3
+Apache Hadoop 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8
+Apache HBase 0.95, 0.96, 0.98, 0.99, 1.0, 1.1, 1.2, 1.3
 ";
 
 $VERSION = "0.4";
@@ -69,11 +79,11 @@ if($progname =~ /namenode/){
 @usage_order = qw/host port bean metrics all-metrics warning critical expected list-beans/;
 get_options();
 
-$host       = validate_host($host);
-$host       = validate_resolvable($host);
-$port       = validate_port($port);
-$bean       = validate_java_bean($bean) if defined($bean);
-my $url     = "http://$host:$port/jmx";
+$host   = validate_host($host);
+$host   = validate_resolvable($host);
+$port   = validate_port($port);
+$bean   = validate_java_bean($bean) if defined($bean);
+my $url = "http://$host:$port/jmx";
 my %stats;
 my @stats;
 unless($list_beans){

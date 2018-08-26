@@ -18,8 +18,6 @@
 
 Nagios Plugin to check the number of dead Alluxio workers via the Alluxio Master UI
 
-TODO: thresholds on number of dead workers (coming soon)
-
 Tested on Alluxio 1.0.0, 1.0.1, 1.1.0
 
 """
@@ -43,7 +41,7 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.3.0'
+__version__ = '0.4.0'
 
 
 class CheckAlluxioDeadWorkers(CheckTachyonDeadWorkers):
@@ -54,6 +52,7 @@ class CheckAlluxioDeadWorkers(CheckTachyonDeadWorkers):
         # Python 3.x
         # super().__init__()
         self.software = 'Alluxio'
+        self.name = ['Alluxio Master', 'Alluxio']
 
 
 if __name__ == '__main__':

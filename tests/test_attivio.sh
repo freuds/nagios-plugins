@@ -22,47 +22,63 @@ cd "$srcdir/.."
 
 . "$srcdir/utils.sh"
 
-is_travis && exit 0
-
-echo "
-# ============================================================================ #
-#                                 A t t i v i o
-# ============================================================================ #
-"
+section "A t t i v i o"
 
 export ATTIVIO_AIE_PORT="${ATTIVIO_AIE_PORT:-17000}"
 export ATTIVIO_AIE_PERFMON_PORT="${ATTIVIO_AIE_PERFMON_PORT:-16960}"
 
-if [ -n "${ATTIVIO_AIE_HOST:-}" ]; then
-    if which nc &>/dev/null && ! echo | nc -w 1 "$ATTIVIO_AIE_HOST" "$ATTIVIO_AIE_PORT"; then
+trap_debug_env attivio
+
+echo "running connection refused tests first:"
+echo
+run_conn_refused ./check_attivio_aie_ingest_session_count.py -v
+
+run_conn_refused ./check_attivio_aie_license_expiry.py -v
+
+run_conn_refused ./check_attivio_aie_system_health.py -v
+
+run_conn_refused ./check_attivio_aie_version.py -v
+
+run_conn_refused ./check_attivio_aie_metrics.py -m "fake" -v
+
+echo
+
+if [ -z "${ATTIVIO_AIE_HOST:-}" ]; then
+    echo "WARNING: \$ATTIVIO_AIE_HOST not set, skipping real Attivio AIE checks"
+else
+    if when_ports_available 5 "$ATTIVIO_AIE_HOST" "$ATTIVIO_AIE_PORT"; then
         echo "WARNING: Attivio AIE host $ATTIVIO_AIE_HOST:$ATTIVIO_AIE_PORT not up, skipping Attivio AIE checks"
     else
-        ./check_attivio_aie_ingest_session_count.py -v
-        hr
-        ./check_attivio_aie_license_expiry.py -v
-        hr
-        ./check_attivio_aie_system_health.py -v
-        hr
-        ./check_attivio_aie_version.py -v
-        hr
+        run ./check_attivio_aie_ingest_session_count.py -v
+
+        run ./check_attivio_aie_license_expiry.py -v
+
+        run ./check_attivio_aie_system_health.py -v
+
+        run ./check_attivio_aie_version.py -v
+
+        run_fail 2 ./check_attivio_aie_version.py -v -e 'fail-version'
     fi
-else
-    echo "WARNING: \$ATTIVIO_AIE_HOST not set, skipping Attivio AIE checks"
 fi
 
-if [ -n "${ATTIVIO_AIE_PERFMON_HOST:-}" ]; then
-    if which nc &>/dev/null && ! echo | nc -w 1 "$ATTIVIO_AIE_PERFMON_HOST" "$ATTIVIO_AIE_PERFMON_PORT"; then
-        echo "WARNING: Attivio AIE PerfMon host $ATTIVIO_AIE_PERFMON_HOST:$ATTIVIO_AIE_PERFMON_PORT not up, skipping Attivio AIE PerfMon checks"
-    else
+if [ -z "${ATTIVIO_AIE_PERFMON_HOST:-}" ]; then
+    echo "WARNING: \$ATTIVIO_AIE_PERFMON_HOST not set, skipping real Attivio AIE PerfMon metric checks"
+else
+    if when_ports_available "$ATTIVIO_AIE_PERFMON_HOST" "$ATTIVIO_AIE_PERFMON_PORT"; then
+        echo "./check_attivio_aie_metrics.py -H "$ATTIVIO_AIE_PERFMON_HOST" -P "$ATTIVIO_AIE_PERFMON_PORT" -l |"
         ./check_attivio_aie_metrics.py -H "$ATTIVIO_AIE_PERFMON_HOST" -P "$ATTIVIO_AIE_PERFMON_PORT" -l |
         tail -n +3 |
         while read metric; do
-            ./check_attivio_aie_metrics.py -H "$ATTIVIO_AIE_PERFMON_HOST" -P "$ATTIVIO_AIE_PERFMON_PORT" -m "$metric" -v
-            hr
+            run ./check_attivio_aie_metrics.py -H "$ATTIVIO_AIE_PERFMON_HOST" -P "$ATTIVIO_AIE_PERFMON_PORT" -m "$metric" -v
         done
+    else
+        echo "WARNING: Attivio AIE PerfMon host $ATTIVIO_AIE_PERFMON_HOST:$ATTIVIO_AIE_PERFMON_PORT not up, skipping Attivio AIE PerfMon checks"
     fi
-else
-    echo "WARNING: \$ATTIVIO_AIE_PERFMON_HOST not set, skipping Attivio AIE PerfMon metric checks"
 fi
+echo
+echo "Completed $run_count Attivio tests"
+echo
+echo "All Attivio tests completed successfully"
+untrap
 echo
 echo

@@ -17,11 +17,19 @@ Primarily written to check things like NS and MX records for domains which the s
 
 Full list of supported record types: " . join(", ", @valid_types) . "
 
-The regex if supplied is validated against each record returned and it is anchored (^regex\$) as that's normally what you want to make it easier to strictly validate IP / name results, but if testing partial TXT records you may need to use .* before and after the regex, eg. '.*spf.*'. If differing TXT records are returned then use alternation '|' as per regex standard to be able to match both types of records, eg. 'regex1|regex2', see tests/test_dns.sh for an example. Requiring validating every record is much safer to ensure there is no rogue DNS server injected in to your domain and anchoring prevents a regex of 10\.10\.10\.10 from matching an unexpected service on 10.10.10.100";
+The regex if supplied is validated against each record returned and it is anchored (^regex\$) as that's normally what you want to make it easier to strictly validate IP / name results, but if testing partial TXT records you may need to use .* before and after the regex, eg. '.*spf.*'. If differing TXT records are returned then use alternation '|' as per regex standard to be able to match both types of records, eg. 'regex1|regex2', see tests/test_dns.sh for an example. Requiring validating every record is much safer to ensure there is no rogue DNS server injected in to your domain and anchoring prevents a regex of 10\.10\.10\.10 from matching an unexpected service on 10.10.10.100
+
+TLDs are validated with the following files:
+
+* lib/resources/tlds-alpha-by-domain.txt
+* lib/resources/custom_tlds.txt
+
+If you need a custom TLD, please add it to custom_tlds.txt.
+";
 
 # TODO: root name servers switch, determine root name servers for the specific TLD and go straight to them to bypass intermediate caching
 
-$VERSION = "0.8.2";
+$VERSION = "0.8.4";
 
 use strict;
 use warnings;
@@ -33,6 +41,7 @@ BEGIN {
 }
 use HariSekhonUtils qw/:DEFAULT :regex/;
 use Data::Dumper;
+use List::Util 'shuffle';
 
 $status_prefix = "DNS";
 my $default_type = "A";
@@ -44,6 +53,7 @@ my $expected_result;
 my $expected_regex;
 my $expected_regex2;
 my $no_uniq_results;
+my $randomize_servers;
 
 %options = (
     "s|server=s"            => [ \$server,          "DNS server(s) to query, can be a comma separated list of servers" ],
@@ -51,10 +61,11 @@ my $no_uniq_results;
     "q|type=s"              => [ \$type,            "DNS query type (defaults to '$default_type' record)"  ],
     "e|expected-result=s"   => [ \$expected_result, "Expected results, comma separated" ],
     "R|expected-regex=s"    => [ \$expected_regex,  "Expected regex to validate against each returned result (anchored, so if testing partial TXT records you may need to use .* before and after the regex, and if differing TXT records are returned then use alternation '|' to support the different regex, see tests/test_dns.sh for an example)" ],
-    "no-uniq-results"       => [ \$no_uniq_results, "Test and display all results, not only unique results" ]
+    "A|randomize-servers"   => [ \$randomize_servers, "Randomize the order of DNS servers" ],
+    "N|no-uniq-results"     => [ \$no_uniq_results, "Test and display all results, not only unique results" ]
 );
 
-@usage_order = qw/server record type expected-result expected-regex/;
+@usage_order = qw/server record type expected-result expected-regex randomize-servers no-uniq-results/;
 get_options();
 
 $server or usage "server(s) not specified";
@@ -73,6 +84,11 @@ if($type eq "PTR"){
 vlog_option "server", join(",", @servers);
 vlog_option "record", $record;
 vlog_option "type",   $type;
+if($randomize_servers){
+    vlog2 "randomizing nameserver list";
+    @servers = shuffle(@servers);
+    vlog_option "servers", join(",", @servers);
+}
 
 my @expected_results;
 if($expected_result){

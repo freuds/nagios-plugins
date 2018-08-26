@@ -27,22 +27,43 @@ srcdir="$srcdir2"
 
 #[ `uname -s` = "Linux" ] || exit 0
 
-echo "
-# ============================================================================ #
-#                                   W h o i s
-# ============================================================================ #
-"
+section "W h o i s"
 
-export DOCKER_IMAGE="harisekhon/nagios-plugins"
+export DOCKER_IMAGE="harisekhon/nagios-plugins:centos"
 export DOCKER_CONTAINER="nagios-plugins-whois-test"
 
-export MNTDIR="/pl"
+export DOCKER_MOUNT_DIR="/pl"
 
-startupwait=1
-DOCKER_OPTS="-v $srcdir/..:$MNTDIR"
+startupwait 0
+DOCKER_OPTS="-v $srcdir/..:$DOCKER_MOUNT_DIR"
 DOCKER_CMD="tail -f /dev/null"
-launch_container "$DOCKER_IMAGE" "$DOCKER_CONTAINER"
-docker exec -ti "$DOCKER_CONTAINER" ls -l /pl
+check_whois="run ./check_whois.pl"
+using_docker=""
+
+# Mac JWhois 4.0 has more issues than CentOS JWhois 4.0 such as "error while checking domain 'google.com': [Unable to connect to remote host]" so use dockerized test on Mac too
+if ! which jwhois &>/dev/null || is_mac; then
+    if ! is_docker_available && grep -e Debian -e Ubuntu /etc/os-release &>/dev/null; then
+        echo "WARNING: jwhois not found in \$PATH, Docker is not available and distribution is Debian/Ubuntu, skipping whois checks as Debian/Ubuntu don't provide jwhois package"
+        echo
+        echo
+        exit 0
+    fi
+    echo "jwhois not found in \$PATH, attempting to use Dockerized test instead"
+    launch_container "$DOCKER_IMAGE" "$DOCKER_CONTAINER"
+    #docker exec -ti "$DOCKER_CONTAINER" ls -l /pl
+    check_whois="run docker exec -ti "$DOCKER_CONTAINER" $DOCKER_MOUNT_DIR/check_whois.pl"
+    using_docker=1
+fi
+
+set +eo pipefail
+if $check_whois -d google.com | fgrep '[Unable to connect to remote host]'; then
+    echo
+    echo "WARNING: Whois port appears blocked outbound, skipping whois checks..."
+    echo
+    echo
+    exit 0
+fi
+set -eo pipefail
 
 # will do a small subset of random domains unless first arg passed to signify all
 ALL="${1:-}"
@@ -52,18 +73,16 @@ echo "Running Whois checks"
 # random domains including some I used to work for to try to get some variation in registrars
 domains="
 cloudera.com
-myspace.com
-bskyb.com
-sky.com
-bnpparibas.com
-specificmedia.com
+hortonworks.com
 experian.com
+experian.co.uk
 myspace.com.ee
 "
 # domains from tickets
 domains="$domains
 shomershabbatscouting.org
 ymkatz.net
+barcodepack.com
 "
 
 # generic TLDs, will generate google.$tld from this list
@@ -198,9 +217,11 @@ for domain in $domains; do
     # for some reason .cn domains often fail on Travis, probably blacklisted
     is_CI && [[ -z "$ALL" && "$domain" =~ \.cn$ ]] && continue
     printf "%-20s  " "$domain:"
-    # don't want people with 25 days left on their domains raising errors here, setting thresholds lower to always pass
+    # counter is lost in subshell but we need to capture so increment here
+    run++
     set +eo pipefail
-    output=`docker exec -ti "$DOCKER_CONTAINER" $MNTDIR/check_whois.pl -d $domain -w 10 -c 2 -t 30 -v $verbose`
+    # don't want people with 25 days left on their domains raising errors here, setting thresholds lower to always pass
+    output=`$check_whois -d $domain -w 10 -c 2 -t 30 -v $verbose`
     result=$?
     echo "$output"
     if [ $result -ne 0 -a $result -eq 3 ]; then
@@ -211,7 +232,7 @@ for domain in $domains; do
     hr
 done
 
-# check_whois.pl has exception handling to give OK back in it's base code so this isn't needed
+# check_whois.pl returns OK when there is no expiry information available from the whois database so these tests are obsolete, we just test the domains in the normal batch instead now
 #echo "Testing Domains excluding expiry:"
 #for domain in $domains_noexpiry; do
 #    set +eo pipefail
@@ -227,9 +248,11 @@ done
 
 echo "Testing Domains excluding nameservers:"
 for domain in $domains_no_nameservers; do
-    [ -z "$ALL" -a "$(($RANDOM % 20))" = 0 ] || continue
+    [ -z "$ALL" -a "$(($RANDOM % 2))" = 0 ] || continue
+    # counter is lost in subshell but we need to capture so increment here
+    run++
     set +eo pipefail
-    output=`docker exec -ti "$DOCKER_CONTAINER" $MNTDIR/check_whois.pl -d $domain -w 10 -c 2 --no-nameservers -t 30 -v $verbose`
+    output=`$check_whois -d $domain -w 10 -c 2 --no-nameservers -t 30 -v $verbose`
     result=$?
     echo "$output"
     if [ $result -ne 0 -a $result -eq 3 ]; then
@@ -240,4 +263,15 @@ for domain in $domains_no_nameservers; do
     hr
 done
 
-delete_container
+if [ -n "$using_docker" ]; then
+    [ -n "${KEEPDOCKER:-}" ] ||
+    delete_container
+    hr
+fi
+
+echo
+echo "Completed $run_count Whois tests"
+echo
+echo "All Whois tests passed successfully"
+echo
+echo

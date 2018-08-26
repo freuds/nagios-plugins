@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   rabbit1:
     hostname: rabbit1
@@ -26,8 +26,19 @@ services:
     extends:
       file: rabbitmq-common.yml
       service: rabbitmq-common
-    links:
-      - rabbit1
     environment:
       - RABBITMQ_CLUSTER_SEED=rabbit1
       - RABBITMQ_RAM_NODE=1
+  rabbit-haproxy:
+    image: haproxy:alpine
+    command: -f /conf/10-global.cfg -f /conf/rabbitmq.cfg -f /conf/rabbitmq-management.cfg -d
+    ports:
+      - 5672
+      - 15672
+    networks:
+      - rabbitmq
+    volumes:
+      - ../../haproxy-configs:/conf:ro
+
+networks:
+  rabbitmq:

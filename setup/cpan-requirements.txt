@@ -73,6 +73,7 @@ LWP::Authen::Negotiate
 LWP::Simple
 LWP::UserAgent
 List::MoreUtils
+List::MoreUtils::XS
 Math::Round
 Module::Build::Tiny
 Module::CPANfile::Result
@@ -99,13 +100,15 @@ SMS::AQL
 Socket6
 Sub::Exporter::Progressive
 Sub::Name
+Sub::Util
 TAP::Harness::Env
 Test::More
 Test::SharedFork
-Thrift
+Thrift@0.10.0
 Time::HiRes
 Type::Tiny::XS
 URI::Escape
 XML::SAX
 XML::Simple
 YAML
+List::MoreUtils::XS

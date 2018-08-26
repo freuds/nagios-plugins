@@ -15,9 +15,10 @@
 
 language: perl
 perl:
-  - "5.22"
   # this build has thread support
-  - "5.18-shrplib"
+  - "5.24-shrplib"
+  #- "5.22"
+  #- "5.18-shrplib"
   #- "5.16"
   # latest Redis cpan module requires Perl >= 5.10
   - "5.10"
@@ -33,8 +34,9 @@ notifications:
 branches:
   only:
     - master
+
 env:
-  DOCKER_COMPOSE_VERSION: 1.9.0
+  - DOCKER_COMPOSE_VERSION=1.16.1 PYTHONUNBUFFERED=1
 
 before_install:
   - sudo rm /usr/local/bin/docker-compose
@@ -63,22 +65,25 @@ install:
   #
   # Travis has python install before in $PATH even in Perl builds so need to install PyPI modules here otherwise they're not found, but perms not set correctly on Travis build to do this, better than modifying $PATH to put /usr/bin first which is likely to affect many other things including potentially not find the perlbrew installation first
   - sudo chown -R travis /opt/python /usr/local /usr/lib/python*
-  - make && make zookeeper
+  - travis_retry make && travis_retry make zookeeper
 
 script:
-  make test
+  - sudo sysctl -w net.ipv4.conf.all.forwarding=1
+  - travis_retry make test
 
 after_success:
   - echo "After Success"
-  - curl -ivv --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/nagios-plugins/trigger/5b0d1a59-8b53-466a-87d7-8e99dfd01f16/
-  - curl -ivv --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/alpine-github/trigger/8d9cb826-48df-439c-8c20-1975713064fc/
-  - curl -ivv --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/centos-github/trigger/316d1158-7ffb-49a4-a7bd-8e5456ba2d15/
-  - curl -ivv --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/ubuntu-github/trigger/abd4dbf0-14bc-454f-9cde-081ec014bc48/
-  - curl -ivv --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/debian-github/trigger/0cfb3fe7-2028-494b-a43b-068435e6a2b3/
+  - curl --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/nagios-plugins/trigger/5b0d1a59-8b53-466a-87d7-8e99dfd01f16/
+  - curl --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/alpine-github/trigger/8d9cb826-48df-439c-8c20-1975713064fc/
+  - curl --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/centos-github/trigger/316d1158-7ffb-49a4-a7bd-8e5456ba2d15/
+  - curl --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/debian-github/trigger/0cfb3fe7-2028-494b-a43b-068435e6a2b3/
+  - curl --data {build:true} -X POST https://registry.hub.docker.com/u/harisekhon/ubuntu-github/trigger/abd4dbf0-14bc-454f-9cde-081ec014bc48/
 
 after_failure:
   - echo "After Failure"
-  - for x in /home/travis/.cpanm/work/*/build.log; do echo "uploading $x"; curl -sT "$x" transfer.sh || :; curl -sT "$x" chunk.io || :; done
+  #- for x in /home/travis/.cpanm/work/*/build.log; do echo "uploading $x"; curl -sT "$x" transfer.sh || :; done
+  # now requires authentication
+  #curl -sT "$x" chunk.io || :
 
 services:
   # docker breaks cassandra, mysql, probably everything
@@ -96,9 +101,9 @@ services:
 #  - redis
 #  - riak
 
-# env stuff is handled with docker test scripts now
 #env:
-#  global:
-#    - MYSQL_DATABASE=mysql
-#    - MYSQL_PASSWORD=""
-#    - MYSQL_USER=travis
+#  - DEBUG=1
+# env vars are handled in docker test scripts now
+#  - MYSQL_DATABASE=mysql
+#  - MYSQL_PASSWORD=""
+#  - MYSQL_USER=travis

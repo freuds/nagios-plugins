@@ -23,9 +23,12 @@ through the brokers
 Thresholds apply to max produce / consume message timings which are also output as perfdata for graphing.
 Total time includes setup, connection and message timings etc.
 
-See also Perl versio check_kafka.pl of which this is a port of since one of the underlying Perl library's dependencies
-developed an autoload bug which needs manual fixing before that Perl version can be run (documented
-at the landing page at https://github.com/harisekhon/nagios-plugins and automated in the build now).
+If partition is not specified it'll randomize the partition selection, but this could result in state flapping
+in between different runs that may select a malfunctioning partition one time and working one the other time
+so ideally you should specify the --partition explicitly and implement a separate check per partition.
+
+See also Perl version check_kafka.pl of which this is a port of since one of the underlying Perl library's
+dependencies developed an autoload bug (now auto-patched in the automated build of this project).
 
 The Perl version does have better info for --list-partitions however, including Replicas,
 ISRs and Leader info per partition as the Perl API exposes this additional information.
@@ -39,6 +42,7 @@ from __future__ import print_function
 #from __future__ import unicode_literals
 
 import os
+import random
 import sys
 import traceback
 try:
@@ -52,14 +56,14 @@ sys.path.append(libdir)
 try:
     # pylint: disable=wrong-import-position
     from harisekhon.utils import log, log_option, ERRORS, CriticalError, UnknownError
-    from harisekhon.utils import validate_int, get_topfile, random_alnum, validate_chars, isSet
+    from harisekhon.utils import validate_hostport, validate_int, get_topfile, random_alnum, validate_chars, isSet
     from harisekhon import PubSubNagiosPlugin
 except ImportError as _:
     print(traceback.format_exc(), end='')
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.3.9'
+__version__ = '0.5.2'
 
 
 class CheckKafka(PubSubNagiosPlugin):
@@ -70,12 +74,16 @@ class CheckKafka(PubSubNagiosPlugin):
         # Python 3.x
         # super().__init__()
         self.name = 'Kafka'
-        self.default_port = 9092
+        self.default_host = 'localhost'
+        self.default_port = '9092'
         self.producer = None
         self.consumer = None
         self.topic = None
-        self.client_id = 'Hari Sekhon ' + os.path.basename(get_topfile()) + ' ' + __version__
-        self.group_id = self.client_id + ' ' + str(os.getpid()) + ' ' + random_alnum(10)
+        self.client_id = 'Hari Sekhon {prog} {version}'.format(prog=os.path.basename(get_topfile()),
+                                                               version=__version__)
+        self.group_id = '{client_id} {pid} {random}'.format(client_id=self.client_id,
+                                                            pid=os.getpid(),
+                                                            random=random_alnum(10))
         self.acks = '1'
         self.retries = 0
         self.partition = None
@@ -83,27 +91,123 @@ class CheckKafka(PubSubNagiosPlugin):
         self.brokers = None
         self.timeout_ms = None
         self.start_offset = None
+        self.sleep_secs = 0
 
     def add_options(self):
         # super(CheckKafka, self).add_options()
-        # TODO: (host_envs, default_host) = getenvs2('HOST', default_host, name)
-        # TODO: env support for Kafka brokers
-        self.add_opt('-H', '--host', \
-                     '-B', '--brokers', \
-                     dest='brokers', metavar='broker_list', default='localhost:9092',
-                     help='Kafka Broker seed list in form host[:port],host2[:port2]... (default: localhost:9092)')
-        self.add_opt('-T', '--topic', help='Kafka Topic')
-        self.add_opt('-p', '--partition', type=int, help='Kafka Partition (default: 0)', default=0)
+        self.add_opt('-B', '--brokers',
+                     dest='brokers', metavar='broker_list',
+                     help='Kafka Broker seed list in form host[:port],host2[:port2]... ' + \
+                             '($KAFKA_BROKERS, $KAFKA_HOST:$KAFKA:PORT, default: localhost:9092)')
+        self.add_opt('-H', '--host',
+                     help='Kafka broker host, used to construct --brokers if not specified ' + \
+                          '($KAFKA_HOST, default: {0})'.format(self.default_host))
+        self.add_opt('-P', '--port',
+                     help='Kafka broker port, used to construct --brokers if not specified ' + \
+                          '($KAFKA_PORT, default: {0})'.format(self.default_port))
+        self.add_opt('-T', '--topic', default=os.getenv('KAFKA_TOPIC'), help='Kafka Topic ($KAFKA_TOPIC)')
+        self.add_opt('-p', '--partition', type=int, help='Kafka Partition (default: random)')
         self.add_opt('-a', '--acks', default=1, choices=['1', 'all'],
                      help='Acks to require from Kafka. Valid options are \'1\' for Kafka ' +
                      'partition leader, or \'all\' for all In-Sync Replicas (may block causing ' +
                      'timeout if replicas aren\'t available, default: 1)')
         self.add_opt('-s', '--sleep', metavar='secs',
-                     help='Sleep in seconds between producing and consuming from given topic (default: 0.5)')
+                     help='Sleep in seconds between producing and consuming from given topic (optional)')
         self.add_opt('--list-topics', action='store_true', help='List Kafka topics from broker(s) and exit')
         self.add_opt('--list-partitions', action='store_true',
                      help='List Kafka topic paritions from broker(s) and exit')
         self.add_thresholds(default_warning=1, default_critical=2)
+
+    def process_broker_args(self):
+        self.brokers = self.get_opt('brokers')
+        host = self.get_opt('host')
+        port = self.get_opt('port')
+        host_env = os.getenv('KAFKA_HOST')
+        port_env = os.getenv('KAFKA_PORT')
+        if not host:
+            # protect against blank strings in env vars
+            if host_env:
+                host = host_env
+            else:
+                host = self.default_host
+        if not port:
+            # protect against blank strings in env vars
+            if port_env:
+                port = port_env
+            else:
+                port = self.default_port
+        brokers_env = os.getenv('KAFKA_BROKERS')
+        if not self.brokers:
+            if brokers_env:
+                self.brokers = brokers_env
+            else:
+                self.brokers = '{0}:{1}'.format(host, port)
+        brokers = ''
+        for broker in self.brokers.split(','):
+            if ':' not in broker:
+                broker += ':{0}'.format(port)
+            validate_hostport(broker)
+            brokers += '{0}, '.format(broker)
+        brokers = brokers.rstrip(', ')
+        self.brokers = brokers
+        log_option('brokers', self.brokers)
+
+    def process_args(self):
+        self.process_broker_args()
+        self.timeout_ms = max((self.timeout * 1000 - 1000) / 2, 1000)
+        sleep_secs = self.get_opt('sleep')
+        if sleep_secs:
+            # validation done through property wrapper
+            self.sleep_secs = sleep_secs
+            log_option('sleep', sleep_secs)
+        try:
+            list_topics = self.get_opt('list_topics')
+            list_partitions = self.get_opt('list_partitions')
+            if list_topics:
+                self.print_topics()
+                sys.exit(ERRORS['UNKNOWN'])
+        except KafkaError:
+            raise CriticalError(self.exception_msg())
+
+        self.topic = self.get_opt('topic')
+        if self.topic:
+            validate_chars(self.topic, 'topic', r'\w\.-')
+        elif list_topics or list_partitions:
+            pass
+        else:
+            self.usage('--topic not specified')
+
+        # because this could fail to retrieve partition metadata and we want it to throw CRITICAL if so
+        try:
+            self.process_partitions(list_partitions)
+        except KafkaError:
+            err = self.exception_msg()
+            raise CriticalError(err)
+
+        self.topic_partition = TopicPartition(self.topic, self.partition)
+        self.acks = self.get_opt('acks')
+        if self.acks == 'all':
+            log_option('acks', self.acks)
+        else:
+            validate_int(self.acks, 'acks')
+            self.acks = int(self.acks)
+        self.validate_thresholds()
+
+    def process_partitions(self, list_partitions=False):
+        if list_partitions:
+            if self.topic:
+                self.print_topic_partitions(self.topic)
+            else:
+                for topic in self.get_topics():
+                    self.print_topic_partitions(topic)
+            sys.exit(ERRORS['UNKNOWN'])
+        self.partition = self.get_opt('partition')
+        # technically optional, will hash to a random partition, but need to know which partition to get offset
+        if self.partition is None:
+            log.info('partition not specified, getting random partition')
+            self.partition = random.choice(list(self.get_topic_partitions(self.topic)))
+            log.info('selected partition %s', self.partition)
+        validate_int(self.partition, "partition", 0, 10000)
 
     def run(self):
         try:
@@ -112,19 +216,20 @@ class CheckKafka(PubSubNagiosPlugin):
             #raise CriticalError(_)
         except KafkaError:
             err = self.exception_msg()
-            if 'NoBrokersAvailable' in err:
-                err += ' ({0})'.format(self.brokers)
             raise CriticalError(err)
 
-    @staticmethod
-    def exception_msg():
-        return traceback.format_exc().split('\n')[-2]
+    def exception_msg(self):
+        err = traceback.format_exc().split('\n')[-2]
+        if 'NoBrokersAvailable' in err:
+            err += ". Could not connect to Kafka broker(s) '{0}'".format(self.brokers)
+        return err
 
     def get_topics(self):
         self.consumer = KafkaConsumer(
             bootstrap_servers=self.brokers,
             client_id=self.client_id,
-            request_timeout_ms=self.timeout_ms
+            #request_timeout_ms=self.timeout_ms + 1, # must be larger than session timeout
+            #session_timeout_ms=self.timeout_ms,
             )
         return self.consumer.topics()
 
@@ -138,7 +243,7 @@ class CheckKafka(PubSubNagiosPlugin):
             topic,
             bootstrap_servers=self.brokers,
             client_id=self.client_id,
-            request_timeout_ms=self.timeout_ms
+            #request_timeout_ms=self.timeout_ms
             )
         if topic not in self.get_topics():
             raise CriticalError("topic '{0}' does not exist on Kafka broker".format(topic))
@@ -153,61 +258,13 @@ class CheckKafka(PubSubNagiosPlugin):
         print(list(self.get_topic_partitions(topic)))
         print()
 
-    def process_args(self):
-        self.brokers = self.get_opt('brokers')
-        # TODO: add broker list validation back in
-        # validate_hostport(self.brokers)
-        log_option('brokers', self.brokers)
-        self.timeout_ms = max((self.timeout * 1000 - 1000) / 2, 1000)
-
-        try:
-            list_topics = self.get_opt('list_topics')
-            list_partitions = self.get_opt('list_partitions')
-            if list_topics:
-                self.print_topics()
-                sys.exit(ERRORS['UNKNOWN'])
-            self.topic = self.get_opt('topic')
-        except KafkaError:
-            raise CriticalError(self.exception_msg())
-
-        if self.topic:
-            validate_chars(self.topic, 'topic', '\w\.-')
-        elif list_topics or list_partitions:
-            pass
-        else:
-            self.usage('--topic not specified')
-
-        try:
-            if list_partitions:
-                if self.topic:
-                    self.print_topic_partitions(self.topic)
-                else:
-                    for topic in self.get_topics():
-                        self.print_topic_partitions(topic)
-                sys.exit(ERRORS['UNKNOWN'])
-        except KafkaError:
-            raise CriticalError(self.exception_msg())
-
-        self.partition = self.get_opt('partition')
-        # technically optional, will hash to a random partition, but need to know which partition to get offset
-        # if self.partition is not None:
-        validate_int(self.partition, "partition", 0, 10000)
-        self.topic_partition = TopicPartition(self.topic, self.partition)
-        self.acks = self.get_opt('acks')
-        try:
-            self.acks = int(self.acks)
-        except ValueError:
-            pass
-        log_option('acks', self.acks)
-        self.validate_thresholds()
-
     def subscribe(self):
         self.consumer = KafkaConsumer(
             #self.topic,
             bootstrap_servers=self.brokers,
             # client_id=self.client_id,
             # group_id=self.group_id,
-            request_timeout_ms=self.timeout_ms
+            #request_timeout_ms=self.timeout_ms
             )
             #key_serializer
             #value_serializer
@@ -243,7 +300,8 @@ class CheckKafka(PubSubNagiosPlugin):
             acks=self.acks,
             batch_size=0,
             max_block_ms=self.timeout_ms,
-            request_timeout_ms=self.timeout_ms
+            #request_timeout_ms=self.timeout_ms + 1, # must be larger than session timeout
+            #session_timeout_ms=self.timeout_ms,
             )
             #key_serializer
             #value_serializer

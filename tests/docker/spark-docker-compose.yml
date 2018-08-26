@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   spark:
     extends:
@@ -22,3 +22,8 @@ services:
     ports:
       - 8080
       - 8081
+    networks:
+      - spark
+
+networks:
+  spark:

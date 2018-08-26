@@ -15,7 +15,7 @@
 
 $DESCRIPTION = "Nagios Plugin to check a Linux Server's timezone is set as expected";
 
-$VERSION = "0.8.0";
+$VERSION = "0.9.0";
 
 use strict;
 use warnings;
@@ -61,7 +61,6 @@ set_timeout();
 vlog2 "getting current timezone\n";
 my $server_timezone = join("\n", cmd("/bin/date +%Z"));
 quit "CRITICAL", "failed to get timezone" unless $server_timezone;
-my $timezone_mismatch = 0;
 $msg = "timezone is '$server_timezone'";
 unless("$server_timezone" eq "$timezone" or "$server_timezone" eq "$alternate_timezone"){
     critical;
@@ -70,7 +69,7 @@ unless("$server_timezone" eq "$timezone" or "$server_timezone" eq "$alternate_ti
     } else {
         $msg .= " (expected: '$timezone')";
     }
-    $timezone_mismatch = 1;
+    quit "CRITICAL", $msg;
 }
 
 # Alpine Linux doesn't have zoneinfo
@@ -81,17 +80,16 @@ if(-f $zoneinfo_file){
     my $linecount = 0;
     while(<$fh1>){
         unless($_ eq <$fh2>){
-            critical;
-            if($verbose and not $timezone_mismatch){
-                $msg = "localtime file '$localtime_file' does not match timezone file '$zoneinfo_file'! $msg";
-                last;
-            }
+            quit "CRITICAL", "$msg, localtime file '$localtime_file' does not match timezone file '$zoneinfo_file'!";
         }
         $linecount++;
-        if($linecount > 10){
-            warning;
-            $msg = "localtime file '$localtime_file' exceeded 10 lines, aborting check! $msg";
+        # the largest file under /usr/share/zoneinfo is 119 lines /usr/share/zoneinfo/right/Atlantic/Madeira
+        if($linecount > 150){
+            quit "CRITICAL", "$msg, localtime file '$localtime_file' exceeded 150 lines, aborting check!";
         }
+    }
+    if(<$fh2>){
+        quit "CRITICAL", "$msg, localtime file '$localtime_file' does not match timezone file '$zoneinfo_file' (zoneinfo file is larger)!";
     }
     close $fh2;
 } else {

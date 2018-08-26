@@ -7,13 +7,15 @@
 #  https://github.com/harisekhon/nagios-plugins
 #
 #  License: see accompanying LICENSE file
-#  
+#
 
 $DESCRIPTION = "Nagios Plugin to check the number of blocks on a Hadoop HDFS Datanode via it's blockScannerReport
 
-Tested on CDH 4.x and Apache Hadoop 2.5.2, 2.6.4, 2.7.2";
+Specify --port 1022 for Kerberized clusters
 
-$VERSION = "0.4";
+Tested on CDH 4.x and Apache Hadoop 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8";
+
+$VERSION = "0.5";
 
 use strict;
 use warnings;
@@ -34,18 +36,18 @@ my $default_critical = 500000;
 $warning  = $default_warning;
 $critical = $default_critical;
 
+env_creds(["HADOOP_DATANODE", "HADOOP"], "Hadoop Datanode");
+
 %options = (
-    "H|host=s"         => [ \$host,         "DataNode host to connect to" ],
-    "P|port=s"         => [ \$port,         "DataNode HTTP port (default: $default_port)" ],
-    "w|warning=s"      => [ \$warning,      "Warning  threshold or ran:ge (inclusive, default: $default_warning)"  ],
-    "c|critical=s"     => [ \$critical,     "Critical threshold or ran:ge (inclusive, default: $default_critical)" ],
+    %hostoptions,
+    %thresholdoptions,
 );
 
 @usage_order = qw/host port warning critical/;
 get_options();
 
-$host       = validate_host($host);
-$port       = validate_port($port);
+$host = validate_host($host);
+$port = validate_port($port);
 validate_thresholds(undef, undef, { "simple" => "upper", "integer" => 1, "positive" => 1});
 
 vlog2;
@@ -65,7 +67,7 @@ if($blockScannerReport =~ /Total Blocks\s+:\s+(\d+)/){
 } elsif($blockScannerReport =~ /block scanner .*not running/i){
     quit "UNKNOWN", "Periodic block scanner is not running. Please check the datanode log if this is unexpected. Perhaps you have dfs.block.scanner.volume.bytes.per.second = 0 in your hdfs-site.xml?";
 } else {
-    quit "CRITICAL", "failed to find total block count from blockScannerReport, $nagios_plugins_support_msg";
+    quit "CRITICAL", "failed to find total block count from blockScannerReport. If this is Hadoop 2.7+ this information does not appear in the block scanner report any more, please use another method. If this is definitely Hadoop <= 2.6 then $nagios_plugins_support_msg";
 }
 
 $msg = "$block_count blocks on datanode $host";

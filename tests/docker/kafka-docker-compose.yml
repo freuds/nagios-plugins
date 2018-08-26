@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   kafka:
     extends:
@@ -21,6 +21,12 @@ services:
     image: harisekhon/kafka:${VERSION:-latest}
     ports:
       - 2181
-      - 9092
+      # If this port is randomized then the Kafka python library seems to not find topics, must be a bug
+      - 9092:9092
     environment:
       - ADVERTISED_HOSTNAME=$ADVERTISED_HOSTNAME
+    networks:
+      - kafka
+
+networks:
+  kafka:

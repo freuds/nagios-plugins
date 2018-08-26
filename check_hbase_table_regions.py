@@ -30,7 +30,7 @@ Raises Warning if not all regions are assigned to RegionServers.
 This will not test if the table is actually enabled, for that you must use
 the adjacent programs check_hbase_table.py or the check_hbase_table_enabled.py
 
-Tested on Apache HBase 1.0.3, 1.1.6, 1.2.2
+Tested on Apache HBase 0.95, 0.96, 0.98, 0.99, 1.0, 1.1, 1.2, 1.3
 
 """
 
@@ -75,7 +75,7 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.2.1'
+__version__ = '0.4'
 
 
 class CheckHBaseTable(NagiosPlugin):
@@ -94,7 +94,7 @@ class CheckHBaseTable(NagiosPlugin):
         self.ok()
 
     def add_options(self):
-        self.add_hostoption(name='HBase Thrift Server', default_host='localhost', default_port=9090)
+        self.add_hostoption(name='HBase Thrift', default_host='localhost', default_port=9090)
         self.add_opt('-T', '--table', help='Table to check is enabled')
         self.add_opt('-l', '--list', action='store_true', help='List tables and exit')
         self.add_thresholds(default_warning=1, default_critical=1)
@@ -122,7 +122,7 @@ class CheckHBaseTable(NagiosPlugin):
         try:
             # cast port to int to avoid low level socket module TypeError for ports > 32000
             self.conn = happybase.Connection(host=self.host, port=int(self.port), timeout=10 * 1000)  # ms
-        except (socket.timeout, ThriftException, HBaseIOError) as _:
+        except (socket.error, socket.timeout, ThriftException, HBaseIOError) as _:
             qquit('CRITICAL', 'error connecting: {0}'.format(_))
 
     def get_tables(self):
@@ -130,7 +130,7 @@ class CheckHBaseTable(NagiosPlugin):
             tables = self.conn.tables()
             if not isList(tables):
                 qquit('UNKNOWN', 'table list returned is not a list! ' + support_msg_api())
-        except (socket.timeout, ThriftException, HBaseIOError) as _:
+        except (socket.error, socket.timeout, ThriftException, HBaseIOError) as _:
             qquit('CRITICAL', 'error while trying to get table list: {0}'.format(_))
 
     def check_table_regions(self):
@@ -145,11 +145,11 @@ class CheckHBaseTable(NagiosPlugin):
                 qquit('CRITICAL', 'table \'{0}\' does not exist'.format(self.table))
             else:
                 qquit('CRITICAL', _)
-        except (socket.timeout, ThriftException) as _:
+        except (socket.error, socket.timeout, ThriftException) as _:
             qquit('CRITICAL', _)
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug(jsonpp(regions))
+            log.debug('%s', jsonpp(regions))
         if not regions:
             qquit('CRITICAL', 'failed to get regions for table \'{0}\''.format(self.table))
         if not isList(regions):

@@ -28,7 +28,7 @@ Checks:
 
 Raises Critical if the table is not enabled or does not exist or if the write fails
 
-Tested on Apache HBase 1.0.3, 1.1.6, 1.2.2
+Tested on Apache HBase 0.90, 0.92, 0.94, 0.95, 0.96, 0.98, 0.99, 1.0, 1.1, 1.2, 1.3
 
 """
 
@@ -74,7 +74,7 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.3'
+__version__ = '0.5'
 
 
 class CheckHBaseWrite(CheckHBaseCell):
@@ -98,7 +98,7 @@ class CheckHBaseWrite(CheckHBaseCell):
         self.ok()
 
     def add_options(self):
-        self.add_hostoption(name='HBase Thrift Server', default_host='localhost', default_port=9090)
+        self.add_hostoption(name='HBase Thrift', default_host='localhost', default_port=9090)
         self.add_opt('-T', '--table', help='Table to write to')
         self.add_thresholds(default_warning=20, default_critical=1000)
         self.add_opt('-p', '--precision', default=2, metavar='int',
@@ -141,7 +141,7 @@ class CheckHBaseWrite(CheckHBaseCell):
                 qquit('CRITICAL', 'column family \'{0}\' does not exist'.format(self.column))
             else:
                 qquit('CRITICAL', _)
-        except (socket.timeout, ThriftException) as _:
+        except (socket.error, socket.timeout, ThriftException) as _:
             qquit('CRITICAL', _)
         total_time = (time.time() - initial_start) * 1000
         self.output(connect_time, total_time)

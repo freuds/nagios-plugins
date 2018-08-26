@@ -21,63 +21,67 @@ cd "$srcdir/..";
 
 . ./tests/utils.sh
 
-echo "
-# ============================================================================ #
-#                                  G e n e o s
-# ============================================================================ #
-"
+section "G e n e o s"
 
 # Try to make these local tests with no dependencies for simplicity
 
-./geneos_wrapper.py echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^OK,'
+run_grep '^OK' ./geneos_wrapper.py echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^OK' ./geneos_wrapper.py --shell --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000
+
+run_grep '^OK' ./geneos_wrapper.py --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000 --shell
+
+run_grep '^WARNING' ./geneos_wrapper.py --result 1 'test 1 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^CRITICAL' ./geneos_wrapper.py --result 2 'test 2 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^UNKNOWN' ./geneos_wrapper.py --result 3 'test 3 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^DEPENDENT' ./geneos_wrapper.py --result 4 'test 4 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^OK' ./geneos_wrapper.py --shell "echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'"
+
+run ./geneos_wrapper.py $perl -T ./check_disk_write.pl -d .
+
+run ./geneos_wrapper.py $perl -T ./check_git_checkout_branch.pl -d . -b "$(git branch | awk '/^*/{print $2}')"
+
+echo "Testing failure detection of wrong git branch (perl):"
+run_grep '^CRITICAL' ./geneos_wrapper.py $perl -T ./check_git_checkout_branch.pl -d . -b nonexistentbranch
+
+echo "Testing failure detection of wrong git branch (python):"
+run_grep '^CRITICAL' ./geneos_wrapper.py ./check_git_checkout_branch.py -d . -b nonexistentbranch
+
+tmpfile="$(mktemp /tmp/geneos_wrapper.txt.XXXXXX)"
+echo test > "$tmpfile"
+
+run ./geneos_wrapper.py $perl -T ./check_file_md5.pl -f "$tmpfile" -v -c 'd8e8fca2dc0f896fd7cb4cb0031ba249'
+
+rm -vf "$tmpfile"
 hr
-./geneos_wrapper.py --shell --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000 | tee /dev/stderr | grep -q '^OK,'
-hr
-./geneos_wrapper.py --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000 --shell | tee /dev/stderr | grep -q '^OK,'
-hr
-./geneos_wrapper.py --result 1 'test 1 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^WARNING,'
-hr
-./geneos_wrapper.py --result 2 'test 2 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^CRITICAL,'
-hr
-./geneos_wrapper.py --result 3 'test 3 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^UNKNOWN,'
-hr
-./geneos_wrapper.py --result 4 'test 4 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^DEPENDENT,'
-hr
-./geneos_wrapper.py --shell "echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'" | tee /dev/stderr | grep -q '^OK,'
-hr
-./geneos_wrapper.py $perl -T ./check_disk_write.pl -d .
-hr
-./geneos_wrapper.py $perl -T ./check_git_branch_checkout.pl -d . -b "$(git branch | awk '/^*/{print $2}')"
-hr
-echo "Testing failure detection of wrong git branch (perl)"
-./geneos_wrapper.py $perl -T ./check_git_branch_checkout.pl -d . -b nonexistentbranch | tee /dev/stderr | grep -q '^CRITICAL,'
-hr
-echo "Testing failure detection of wrong git branch (python)"
-./geneos_wrapper.py ./check_git_branch_checkout.py -d . -b nonexistentbranch | tee /dev/stderr | grep -q '^CRITICAL,'
-hr
-echo test > test.txt
-./geneos_wrapper.py $perl -T ./check_file_md5.pl -f test.txt -v -c 'd8e8fca2dc0f896fd7cb4cb0031ba249'
-hr
-./geneos_wrapper.py $perl -T ./check_timezone.pl -T "$(readlink /etc/localtime | sed 's/.*zoneinfo\///')" -A "$(date +%Z)" -T "$(readlink /etc/localtime)"
-hr
-echo "Testing induced failures"
-hr
+
+run ./geneos_wrapper.py $perl -T ./check_timezone.pl -T "$(readlink /etc/localtime | sed 's/.*zoneinfo\///')" -A "$(date +%Z)" -T "$(readlink /etc/localtime)"
+
+echo "Testing induced failures:"
+echo
 # should return zero exit code regardless but raise non-OK statuses in STATUS field
-./geneos_wrapper.py --shell exit 0 | tee /dev/stderr | grep -q "^OK,"
-hr
-./geneos_wrapper.py --shell exit 1 | tee /dev/stderr | grep -q "^WARNING,"
-hr
-./geneos_wrapper.py --shell exit 2 | tee /dev/stderr | grep -q "^CRITICAL,"
-hr
-./geneos_wrapper.py --shell exit 3 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./geneos_wrapper.py --shell exit 5 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./geneos_wrapper.py nonexistentcommand arg1 arg2 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./geneos_wrapper.py --shell nonexistentcommand arg1 arg2 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./geneos_wrapper.py $perl -T check_disk_write.pl --help | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-echo "Success!"
-echo; echo
+run_grep '^OK' ./geneos_wrapper.py --shell exit 0
+
+run_grep '^WARNING' ./geneos_wrapper.py --shell exit 1
+
+run_grep '^CRITICAL' ./geneos_wrapper.py --shell exit 2
+
+run_grep '^UNKNOWN' ./geneos_wrapper.py --shell exit 3
+
+run_grep '^UNKNOWN' ./geneos_wrapper.py --shell exit 5
+
+run_grep '^UNKNOWN' ./geneos_wrapper.py nonexistentcommand arg1 arg2
+
+run_grep '^UNKNOWN' ./geneos_wrapper.py --shell nonexistentcommand arg1 arg2
+
+run_grep '^UNKNOWN' ./geneos_wrapper.py $perl -T check_disk_write.pl --help
+
+echo "Completed $run_count Geneos tests"
+echo
+echo "All Geneos wrapper tests completed successfully"
+echo
+echo

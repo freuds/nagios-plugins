@@ -21,64 +21,172 @@ cd "$srcdir/..";
 
 . ./tests/utils.sh
 
-echo "
-# ============================================================================ #
-#                           E l a s t i c s e a r c h
-# ============================================================================ #
-"
+section "E l a s t i c s e a r c h"
 
-export ELASTICSEARCH_VERSIONS="${@:-${ELASTICSEARCH_VERSIONS:-latest 1.4 1.5 1.6 1.7 2.0 2.2 2.3 2.4 5.0}}"
+# Elasticsearch 6.0+ only available on new docker.elastic.co which uses full sub-version x.y.z and does not have x.y tags
+# Any version given as x.y.z will use docker.elastic.co repo, otherwise old dockerhub images
+# Platinum edition with X-Pack is only available from 6.x onwards from docker.elastic.co
+export ELASTICSEARCH_VERSIONS="${@:-${ELASTICSEARCH_VERSIONS:-1.3 1.4 1.5 1.6 1.7 2.0 2.1 2.2 2.3 2.4 5.0 5.1 5.2 5.3 5.4 5.5 5.6  5.2.1 5.3.3 5.4.3 5.5.3 5.6.8 6.0.1 6.1.4 6.2.4  6.0.1-x-pack 6.1.4-x-pack 6.2.4-x-pack  latest}}"
 
 ELASTICSEARCH_HOST="${DOCKER_HOST:-${ELASTICSEARCH_HOST:-${HOST:-localhost}}}"
 ELASTICSEARCH_HOST="${ELASTICSEARCH_HOST##*/}"
 ELASTICSEARCH_HOST="${ELASTICSEARCH_HOST%%:*}"
 export ELASTICSEARCH_HOST
-export ELASTICSEARCH_PORT="${ELASTICSEARCH_PORT:-9200}"
+export ELASTICSEARCH_PORT_DEFAULT=9200
+export HAPROXY_PORT_DEFAULT=9200
 export ELASTICSEARCH_INDEX="${ELASTICSEARCH_INDEX:-test}"
+
+export HAPROXY_USER="esuser"
+export HAPROXY_PASSWORD="espass"
 
 check_docker_available
 
-startupwait 20
+trap_debug_env elasticsearch
+
+# Elasticsearch 5.x takes ~ 50 secs to start up, sometimes doesn't start after 90 secs :-/
+startupwait 120
+
+# Elasticsearch 5.0 may fail to start up properly complaining about vm.max_map_count, fix is to do:
+#
+#  sudo sysctl -w vm.max_map_count=232144
+#  grep vm.max_map_count /etc/sysctl.d/99-elasticsearch.conf || echo vm.max_map_count=232144 >> /etc/sysctl.d/99-elasticsearch.conf
+
+remove_shard_replicas(){
+        echo "removing replicas of all indices to avoid failing tests with unassigned shards:"
+        set +o pipefail
+        $perl -T ./check_elasticsearch_index_exists.pl --list-indices |
+        tail -n +2 |
+        grep -v "^[[:space:]]*$" |
+        while read index; do
+            echo "reducing replicas for index '$index'"
+            curl -u "${ELASTICSEARCH_USER:-}:${ELASTICSEARCH_PASSWORD:-}" -H "content-type: application/json" -XPUT "http://$ELASTICSEARCH_HOST:$ELASTICSEARCH_PORT/$index/_settings" -d '
+            {
+                "index": {
+                    "number_of_replicas": 0
+                }
+            }
+            '
+            echo
+        done
+        set -o pipefail
+}
 
 test_elasticsearch(){
     local version="$1"
-    echo "Setting up Elasticsearch $version test container"
-    #launch_container "$DOCKER_IMAGE:$version" "$DOCKER_CONTAINER" $ELASTICSEARCH_PORT
+    section2 "Setting up Elasticsearch $version test container"
+    # re-enable this when Elastic.co finally support 'latest' tag
+    #if [ "$version" != "latest" ] && [ "${version:0:1}" -ge 6 ]; then
+    if egrep -q '^[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+$' <<< "$version"; then
+        local export COMPOSE_FILE="$srcdir/docker/$DOCKER_SERVICE-elastic.co-docker-compose.yml"
+    elif egrep -q '^[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+-x-pack$' <<< "$version"; then
+        local version="${version%-x-pack}"
+        local export COMPOSE_FILE="$srcdir/docker/$DOCKER_SERVICE-platinum-docker-compose.yml"
+        export ELASTICSEARCH_USER="elastic"
+        export ELASTICSEARCH_PASSWORD="password"
+        local export HAPROXY_USER="elastic"
+        local export HAPROXY_PASSWORD="password"
+        local export X_PACK=1
+    fi
+    docker_compose_pull
     VERSION="$version" docker-compose up -d
-    elasticsearch_port="`docker-compose port "$DOCKER_SERVICE" "$ELASTICSEARCH_PORT" | sed 's/.*://'`"
+    hr
+    echo "getting Elasticsearch dynamic port mapping:"
+    docker_compose_port "Elasticsearch"
+    DOCKER_SERVICE=elasticsearch-haproxy docker_compose_port HAProxy
+    hr
+    when_ports_available "$ELASTICSEARCH_HOST" "$ELASTICSEARCH_PORT" "$HAPROXY_PORT"
+    hr
+    when_url_content "http://$ELASTICSEARCH_HOST:$ELASTICSEARCH_PORT" "lucene_version" -u "${ELASTICSEARCH_USER:-}:${ELASTICSEARCH_PASSWORD:-}"
+    hr
+    echo "checking HAProxy Elasticsearch with authentication:"
+    when_url_content "http://$ELASTICSEARCH_HOST:$HAPROXY_PORT" "lucene_version" -u "$HAPROXY_USER:$HAPROXY_PASSWORD"
+    hr
     if [ -n "${NOTESTS:-}" ]; then
         exit 0
     fi
-    when_ports_available "$startupwait" "$ELASTICSEARCH_HOST" "$elasticsearch_port"
     # Travis added this
     #echo "deleting twitter index as 5 unassigned shards are breaking tests"
     #curl -XDELETE "http://localhost:9200/twitter" || :
     #curl -XDELETE "http://$ELASTICSEARCH_HOST:$ELASTICSEARCH_PORT/$ELASTICSEARCH_INDEX" || :
     # always returns 0 and I don't wanna parse the json error
     #if ! curl -s "http://$ELASTICSEARCH_HOST:$ELASTICSEARCH_PORT/$ELASTICSEARCH_INDEX" &>/dev/null; then
-
-    if ! $perl -T ./check_elasticsearch_index_exists.pl -P "$elasticsearch_port" --list-indices | grep "^[[:space:]]*$ELASTICSEARCH_INDEX[[:space:]]*$"; then
-        echo "creating test Elasticsearch index '$ELASTICSEARCH_INDEX'"
-        curl -iv -XPUT "http://$ELASTICSEARCH_HOST:$elasticsearch_port/$ELASTICSEARCH_INDEX/" -d '
-        {
-            "settings": {
-                "index": {
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0
+    if [ -z "${NODOCKER:-}" ]; then
+        if ! $perl -T ./check_elasticsearch_index_exists.pl --list-indices | grep "^[[:space:]]*$ELASTICSEARCH_INDEX[[:space:]]*$"; then
+            echo "creating test Elasticsearch index '$ELASTICSEARCH_INDEX'"
+            # Elasticsearch 6.0 insists on application/json header otherwise index is not created
+            curl -iv -u "${ELASTICSEARCH_USER:-}:${ELASTICSEARCH_PASSWORD:-}" -H "content-type: application/json" -XPUT "http://$ELASTICSEARCH_HOST:$ELASTICSEARCH_PORT/$ELASTICSEARCH_INDEX/" -d '
+            {
+                "settings": {
+                    "index": {
+                        "number_of_shards": 1,
+                        "number_of_replicas": 0
+                    }
                 }
             }
-        }
-        '
+            '
+            echo
+        fi
+        hr
+        remove_shard_replicas
+        echo
+        echo "Setup done, starting checks ..."
     fi
-    echo
-    echo "Setup done, starting checks ..."
     hr
     if [ "$version" = "latest" ]; then
         local version=".*"
     fi
+    elasticsearch_tests
     echo
-    $perl -T ./check_elasticsearch.pl -P "$elasticsearch_port" -v --es-version "$version"
+    section2 "Running HAProxy + Authentication tests"
+    ELASTICSEARCH_PORT="$HAPROXY_PORT" \
+    ELASTICSEARCH_USER="$HAPROXY_USER" \
+    ELASTICSEARCH_PASSWORD="$HAPROXY_PASSWORD" \
+    elasticsearch_tests
+    # TODO: run fail auth tests for all plugins and add run_fail_auth to bash-tools/utils.sh with run_grep string
+
+    echo "Completed $run_count Elasticsearch tests"
     hr
+    [ -n "${KEEPDOCKER:-}" ] ||
+    docker-compose down
+}
+
+elasticsearch_tests(){
+    run $perl -T ./check_elasticsearch.pl -v --es-version "$version"
+
+    run_fail 2 $perl -T ./check_elasticsearch.pl -v --es-version "fail-version"
+
+    run_conn_refused $perl -T ./check_elasticsearch.pl -v --es-version "$version"
+
+    if [ "$X_PACK" = 1 ]; then
+        run ./check_elasticsearch_x-pack_license_expiry.py --trial -w 20
+
+        run_fail 1 ./check_elasticsearch_x-pack_license_expiry.py -w 20
+
+        run_fail 1 ./check_elasticsearch_x-pack_license_expiry.py --trial
+
+        run_fail 2 ./check_elasticsearch_x-pack_license_expiry.py -c 30
+
+        run_conn_refused ./check_elasticsearch_x-pack_license_expiry.py
+
+        run_fail 3 ./check_elasticsearch_x-pack_feature_enabled.py -l
+
+        run ./check_elasticsearch_x-pack_feature_enabled.py -f security
+
+        run ./check_elasticsearch_x-pack_feature_enabled.py -f monitoring
+
+        run ./check_elasticsearch_x-pack_feature_enabled.py -f logstash
+
+        run ./check_elasticsearch_x-pack_feature_enabled.py -f ml
+
+        run ./check_elasticsearch_x-pack_feature_enabled.py -f graph
+
+        run ./check_elasticsearch_x-pack_feature_enabled.py -f watcher
+
+        run_fail 2 ./check_elasticsearch_x-pack_feature_enabled.py -f nonexistentfeature
+
+        run_conn_refused ./check_elasticsearch_x-pack_feature_enabled.py -f security
+    fi
+
     # Listing checks return UNKNOWN
     set +e
     # _cat/fielddata API is no longer outputs lines for 0b fielddata nodes in Elasticsearch 5.0 - https://github.com/elastic/elasticsearch/issues/21564
@@ -86,73 +194,136 @@ test_elasticsearch(){
     # this works too but let's test the --list-nodes from one of the plugins
     #export ELASTICSEARCH_NODE="$(curl -s $HOST:9200/_nodes | python -c 'import json, sys; print json.load(sys.stdin)["nodes"].values()[0]["node"]')"
     # taking hostname not node name here, ip is $2, node name is $3
-    export ELASTICSEARCH_NODE="$(DEBUG='' $perl -T ./check_elasticsearch_node_disk_percent.pl -P "$elasticsearch_port" --list-nodes | grep -vi -e '^Elasticsearch Nodes' -e '^Hostname' -e '^[[:space:]]*$' | awk '{print $1; exit}' )"
+    export ELASTICSEARCH_NODE="$(DEBUG='' $perl -T ./check_elasticsearch_node_disk_percent.pl --list-nodes | grep -vi -e '^Elasticsearch Nodes' -e '^Hostname' -e '^[[:space:]]*$' | awk '{print $1; exit}' )"
     [ -n "$ELASTICSEARCH_NODE" ] || die "failed to determine Elasticsearch node name from API!"
+    set -e
     echo "determined Elasticsearch node => $ELASTICSEARCH_NODE"
-    #result=$?
-    #[ $result = 3 ] || exit $result
     hr
-    $perl -T ./check_elasticsearch_index_exists.pl -P "$elasticsearch_port" --list-indices
-    result=$?
-    [ $result = 3 ] || exit $result
-    set -e
+    run_fail 3 $perl -T ./check_elasticsearch_index_exists.pl --list-indices
+
+    run_conn_refused $perl -T ./check_elasticsearch_index_exists.pl --list-indices
+
+    run $perl -T ./check_elasticsearch_cluster_disk_balance.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_cluster_disk_balance.pl -v
+
+    # recent versions of Elasticsearch create indices with shard replicas later so call this again late to ensure we don't hit unassigned shards
+    remove_shard_replicas
+
+    # no longer necessary since reducing monitoring index replication to zero
+    #echo "waiting for shards to be allocated (takes longer in Elasticsearch 6.0):"
+    #retry 10 $perl -T ./check_elasticsearch_cluster_shards.pl -v
     hr
-    $perl -T ./check_elasticsearch_cluster_disk_balance.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_cluster_shards.pl -P "$elasticsearch_port" -v # --unassigned-shards 5,5 # travis now has 5 unassigned shards for some reason
-    hr
-    $perl -T ./check_elasticsearch_cluster_shard_balance.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_cluster_stats.pl -P "$elasticsearch_port" -v
-    hr
-    set +e
-    $perl -T ./check_elasticsearch_cluster_status.pl -P "$elasticsearch_port" -v
-    # travis has yellow status
-    result=$?
-    [ $result = 0 -o $result = 1 ] || exit $result
-    set -e
-    hr
-    $perl -T ./check_elasticsearch_cluster_status_nodes_shards.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_data_nodes.pl -P "$elasticsearch_port" -w 1 -v
-    hr
-    $perl -T ./check_elasticsearch_doc_count.pl -P "$elasticsearch_port" -v
-    hr
-    # _cat/fielddata API is no longer outputs lines for 0b fielddata nodes in Elasticsearch 5.0 - https://github.com/elastic/elasticsearch/issues/21564
-    $perl -T ./check_elasticsearch_fielddata.pl -P "$elasticsearch_port" -N "$ELASTICSEARCH_NODE" -v
-    hr
-    $perl -T ./check_elasticsearch_index_exists.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_index_age.pl -P "$elasticsearch_port" -v -w 0:1
+
+    run $perl -T ./check_elasticsearch_cluster_shards.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_cluster_shards.pl -v
+
+    # no longer necessary since reducing monitoring index replication to zero
+    #echo "waiting for shard balance (takes longer in Elasticsearch 6.0):"
+    #retry 10 $perl -T ./check_elasticsearch_cluster_shard_balance.pl -v
     #hr
-    #perl -T ./check_elasticsearch_index_health.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_index_replicas.pl -P "$elasticsearch_port" -w 0 -v
-    hr
-    $perl -T ./check_elasticsearch_index_settings.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_index_shards.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_index_stats.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_master_node.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_nodes.pl -P "$elasticsearch_port" -v -w 1
-    hr
-    $perl -T ./check_elasticsearch_node_disk_percent.pl -P "$elasticsearch_port" -N "$ELASTICSEARCH_NODE" -v -w 90 -c 95
-    hr
-    $perl -T ./check_elasticsearch_node_shards.pl -P "$elasticsearch_port" -N "$ELASTICSEARCH_NODE" -v
-    hr
-    $perl -T ./check_elasticsearch_node_stats.pl -P "$elasticsearch_port" -N "$ELASTICSEARCH_NODE" -v
-    hr
-    $perl -T ./check_elasticsearch_pending_tasks.pl -P "$elasticsearch_port" -v
-    hr
-    $perl -T ./check_elasticsearch_shards_state_detail.pl -P "$elasticsearch_port" -v
-    hr
-    #delete_container
-    docker-compose down
+
+    run $perl -T ./check_elasticsearch_cluster_shard_balance.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_cluster_shard_balance.pl -v
+
+    run $perl -T ./check_elasticsearch_cluster_stats.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_cluster_stats.pl -v
+
+    # travis has yellow status
+    run_fail "0 1" $perl -T ./check_elasticsearch_cluster_status.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_cluster_status.pl -v
+
+    remove_shard_replicas
+    # didn't help with default monitoring index due to replication factor > 1 node, setting replication to zero was the fix
+    #echo "waiting for cluster status, nodes and shards to pass (takes longer on Elasticsearch 6.0):"
+    #retry 10 $perl -T ./check_elasticsearch_cluster_status_nodes_shards.pl -v
+    #hr
+
+    run $perl -T ./check_elasticsearch_cluster_status_nodes_shards.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_cluster_status_nodes_shards.pl -v
+
+    run $perl -T ./check_elasticsearch_data_nodes.pl -w 1 -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_data_nodes.pl -w 1 -v
+
+    run $perl -T ./check_elasticsearch_doc_count.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_doc_count.pl -v
+
+    # _cat/fielddata API is no longer outputs lines for 0b fielddata nodes in Elasticsearch 5.0 - https://github.com/elastic/elasticsearch/issues/21564
+    run $perl -T ./check_elasticsearch_fielddata.pl -N "$ELASTICSEARCH_NODE" -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_fielddata.pl -N "$ELASTICSEARCH_NODE" -v
+
+    run $perl -T ./check_elasticsearch_index_exists.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_index_exists.pl -v
+
+    # the field for this is not available in Elasticsearch 1.3
+    if [ "$version" != 1.3  ]; then
+        run $perl -T ./check_elasticsearch_index_age.pl -v -w 0:1
+    fi
+
+    run_conn_refused $perl -T ./check_elasticsearch_index_age.pl -v -w 0:1
+
+    #run perl -T ./check_elasticsearch_index_health.pl -v
+
+    #run_conn_refused perl -T ./check_elasticsearch_index_health.pl -v
+
+    run $perl -T ./check_elasticsearch_index_replicas.pl -w 0 -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_index_replicas.pl -w 0 -v
+
+    run $perl -T ./check_elasticsearch_index_settings.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_index_settings.pl -v
+
+    run $perl -T ./check_elasticsearch_index_shards.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_index_shards.pl -v
+
+    run $perl -T ./check_elasticsearch_index_stats.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_index_stats.pl -v
+
+    run $perl -T ./check_elasticsearch_master_node.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_master_node.pl -v
+
+    run $perl -T ./check_elasticsearch_nodes.pl -v -w 1
+
+    run_conn_refused $perl -T ./check_elasticsearch_nodes.pl -v -w 1
+
+    run $perl -T ./check_elasticsearch_node_disk_percent.pl -N "$ELASTICSEARCH_NODE" -v -w 99 -c 99
+
+    run_conn_refused $perl -T ./check_elasticsearch_node_disk_percent.pl -N "$ELASTICSEARCH_NODE" -v -w 99 -c 99
+
+    echo "checking threshold failure warning:"
+    run_fail 1 $perl -T ./check_elasticsearch_node_disk_percent.pl -N "$ELASTICSEARCH_NODE" -v -w 1 -c 99
+
+    echo "checking threshold failure critical:"
+    run_fail 2 $perl -T ./check_elasticsearch_node_disk_percent.pl -N "$ELASTICSEARCH_NODE" -v -w 1 -c 2
+
+    run $perl -T ./check_elasticsearch_node_shards.pl -N "$ELASTICSEARCH_NODE" -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_node_shards.pl -N "$ELASTICSEARCH_NODE" -v
+
+    run $perl -T ./check_elasticsearch_node_stats.pl -N "$ELASTICSEARCH_NODE" -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_node_stats.pl -N "$ELASTICSEARCH_NODE" -v
+
+    run $perl -T ./check_elasticsearch_pending_tasks.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_pending_tasks.pl -v
+
+    run $perl -T ./check_elasticsearch_shards_state_detail.pl -v
+
+    run_conn_refused $perl -T ./check_elasticsearch_shards_state_detail.pl -v
 }
 
-for version in $(ci_sample $ELASTICSEARCH_VERSIONS); do
-    test_elasticsearch $version
-done
+run_test_versions Elasticsearch

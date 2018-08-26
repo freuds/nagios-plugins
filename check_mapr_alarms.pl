@@ -20,7 +20,7 @@ Verbose mode prints the alarm descriptions in brackets.
 
 Perfdata is always output for the number of alarms.
 
-Tested on MapR 4.0.1, 5.1.0";
+Tested on MapR 4.0.1, 5.1.0, 5.2.1";
 
 $VERSION = "0.1";
 
@@ -88,11 +88,11 @@ foreach my $item (@data){
     next if($entity_name and $entity ne $entity_name);
     next unless get_field2($item, "alarm state"); # ignore alarm state 0 (cleared alarms)
     $alarm_name  = get_field2($item, "alarm name");
-    next if($exclude_core    and $alarm_name eq "NODE_ALARM_CORE_PRESENT"); 
-    next if($exclude_license and $alarm_name eq "CLUSTER_ALARM_LICENSE_NEAR_EXPIRATION"); 
+    next if($exclude_core    and $alarm_name eq "NODE_ALARM_CORE_PRESENT");
+    next if($exclude_license and $alarm_name eq "CLUSTER_ALARM_LICENSE_NEAR_EXPIRATION");
     $alarm_time  = get_field2($item, "alarm statechange time");
     $description  = get_field2($item, "description");
-    next if($exclude_unknown_service_state and $description =~ /Can not determine if service: .+ is running/i); 
+    next if($exclude_unknown_service_state and $description =~ /Can not determine if service: .+ is running/i);
     if($entity_alarms{$entity}{$alarm_name}){
         if($alarm_time > $entity_alarms{$entity}{$alarm_name}{"alarm_time"}){
             $entity_alarms{$entity}{$alarm_name}{"alarm_time"}  = $alarm_time;

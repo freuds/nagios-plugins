@@ -24,9 +24,9 @@ Runs in 1 of 3 modes:
    - checks optional thresholds for the maximum number of missing nodes from the specified list (default 0 == CRITICAL on any missing, you may want to set these thresholds higher)
 3. checks the JobTracker Heap % Used
 
-Originally written on old vanilla Apache Hadoop 0.20.x, backwards untested rewrite for CDH 4.3 (2.0.0-mr1-cdh4.3.0), now tested on Apache Hadoop 2.5.2, 2.6.4, 2.7.2
+Originally written on old vanilla Apache Hadoop 0.20.x, backwards untested rewrite for CDH 4.3 (2.0.0-mr1)
 
-Seriously recommend you consider using check_hadoop_cloudera_manager_metrics.pl instead if possible (disclaimer I work for Cloudera but seriously it's better it uses the CM API instead of scraping output which can break betweens versions and requires more maintenance)";
+Seriously recommend you consider using check_hadoop_cloudera_manager_metrics.pl instead if possible (disclaimer I worked for Cloudera but seriously it's better it uses the CM API instead of scraping output which can break betweens versions and requires more maintenance)";
 
 $VERSION = "0.9.3";
 
@@ -107,7 +107,7 @@ if(defined($nodes)){
                                         } );
 } elsif($heap or $non_heap){
     $url = "http://$host:$port/$jobtracker_urn";
-    validate_thresholds(1, 1, { 
+    validate_thresholds(1, 1, {
                                 "simple"   => "upper",
                                 "positive" => 1,
                                 "integer"  => 0,
@@ -246,13 +246,13 @@ if(defined($nodes)){
 #        "map_task_capacity"     => "map_slots"
 #        "reduce_task_capacity"  => "reduce_slots",
 #        # not supplied in /metrics
-#        #"avg_tasks_node"        => 
+#        #"avg_tasks_node"        =>
 #        "blacklisted_nodes"     => "trackers_blacklisted",
 #    );
     @stats = qw/jobs_submitted map_slots reduce_slots running_maps running_reduces trackers trackers_blacklisted/;
     parse_stats();
     #foreach(qw/maps reduces total_submissions nodes map_task_capacity reduce_task_capacity avg_tasks_node blacklisted_nodes/){
-    $stats{"avg_tasks_node"} = ($stats{"map_slots"} + $stats{"reduce_slots"}) / $stats{"trackers"}; 
+    $stats{"avg_tasks_node"} = ($stats{"map_slots"} + $stats{"reduce_slots"}) / $stats{"trackers"};
 
     $status = "OK";
     #$msg = sprintf("%d MapReduce nodes available, %d blacklisted nodes", $stats{"nodes"}, $stats{"blacklisted_nodes"});

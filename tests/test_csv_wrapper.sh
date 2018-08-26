@@ -21,63 +21,64 @@ cd "$srcdir/..";
 
 . ./tests/utils.sh
 
-echo "
-# ============================================================================ #
-#                             C S V   W r a p p e r
-# ============================================================================ #
-"
+section "C S V   W r a p p e r"
 
 # Try to make these local tests with no dependencies for simplicity
 
-./csv_wrapper.py echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^OK,'
-hr
-./csv_wrapper.py --shell --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000 | tee /dev/stderr | grep -q '^OK,'
-hr
-./csv_wrapper.py --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000 --shell | tee /dev/stderr | grep -q '^OK,'
-hr
-./csv_wrapper.py --result 1 'test 1 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^WARNING,'
-hr
-./csv_wrapper.py --result 2 'test 2 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^CRITICAL,'
-hr
-./csv_wrapper.py --result 3 'test 3 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^UNKNOWN,'
-hr
-./csv_wrapper.py --result 4 'test 4 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000' | tee /dev/stderr | grep -q '^DEPENDENT,'
-hr
-./csv_wrapper.py --shell "echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'" | tee /dev/stderr | grep -q '^OK,'
-hr
-./csv_wrapper.py $perl -T ./check_disk_write.pl -d .
-hr
-./csv_wrapper.py $perl -T ./check_git_branch_checkout.pl -d . -b "$(git branch | awk '/^*/{print $2}')"
-hr
+run_grep '^OK,' ./csv_wrapper.py echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^OK,' ./csv_wrapper.py --shell --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000
+
+run_grep '^OK,' ./csv_wrapper.py --result 0 test 'message | perf1=10s;1;2 perf2=5%;80;90;0;100' perf3=1000 --shell
+
+run_grep '^WARNING,' ./csv_wrapper.py --result 1 'test 1 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^CRITICAL,' ./csv_wrapper.py --result 2 'test 2 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^UNKNOWN,' ./csv_wrapper.py --result 3 'test 3 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^DEPENDENT' ./csv_wrapper.py --result 4 'test 4 message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'
+
+run_grep '^OK,' ./csv_wrapper.py --shell "echo 'test message | perf1=10s;1;2 perf2=5%;80;90;0;100 perf3=1000'"
+
+run ./csv_wrapper.py $perl -T ./check_disk_write.pl -d .
+
+run ./csv_wrapper.py $perl -T ./check_git_checkout_branch.pl -d . -b "$(git branch | awk '/^*/{print $2}')"
+
 echo "Testing failure detection of wrong git branch (perl)"
-./csv_wrapper.py $perl -T ./check_git_branch_checkout.pl -d . -b nonexistentbranch | tee /dev/stderr | grep -q '^CRITICAL,'
-hr
+run_grep '^CRITICAL,' ./csv_wrapper.py $perl -T ./check_git_checkout_branch.pl -d . -b nonexistentbranch
+
 echo "Testing failure detection of wrong git branch (python)"
-./geneos_wrapper.py ./check_git_branch_checkout.py -d . -b nonexistentbranch | tee /dev/stderr | grep -q '^CRITICAL,'
+run_grep '^CRITICAL', ./geneos_wrapper.py ./check_git_checkout_branch.py -d . -b nonexistentbranch
+
+tmpfile="$(mktemp /tmp/csv_wrapper.txt.XXXXXX)"
+echo test > "$tmpfile"
+run ./csv_wrapper.py $perl -T ./check_file_md5.pl -f "$tmpfile" -v -c 'd8e8fca2dc0f896fd7cb4cb0031ba249'
+rm -vf "$tmpfile"
 hr
-echo test > test.txt
-./csv_wrapper.py $perl -T ./check_file_md5.pl -f test.txt -v -c 'd8e8fca2dc0f896fd7cb4cb0031ba249'
-hr
-./csv_wrapper.py $perl -T ./check_timezone.pl -T "$(readlink /etc/localtime | sed 's/.*zoneinfo\///')" -A "$(date +%Z)" -T "$(readlink /etc/localtime)"
-hr
-echo "Testing induced failures"
-hr
+run ./csv_wrapper.py $perl -T ./check_timezone.pl -T "$(readlink /etc/localtime | sed 's/.*zoneinfo\///')" -A "$(date +%Z)" -T "$(readlink /etc/localtime)"
+
+echo "Testing induced failures:"
+echo
 # should return zero exit code regardless but raise non-OK statuses in STATUS field
-./csv_wrapper.py --shell exit 0 | tee /dev/stderr | grep -q "^OK,"
-hr
-./csv_wrapper.py --shell exit 1 | tee /dev/stderr | grep -q "^WARNING,"
-hr
-./csv_wrapper.py --shell exit 2 | tee /dev/stderr | grep -q "^CRITICAL,"
-hr
-./csv_wrapper.py --shell exit 3 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./csv_wrapper.py --shell exit 5 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./csv_wrapper.py nonexistentcommand arg1 arg2 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./csv_wrapper.py --shell nonexistentcommand arg1 arg2 | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-./csv_wrapper.py $perl -T check_disk_write.pl --help | tee /dev/stderr | grep -q "^UNKNOWN,"
-hr
-echo "Success!"
-echo; echo
+run_grep '^OK,' ./csv_wrapper.py --shell exit 0
+
+run_grep '^WARNING,' ./csv_wrapper.py --shell exit 1
+
+run_grep '^CRITICAL,' ./csv_wrapper.py --shell exit 2
+
+run_grep '^UNKNOWN,' ./csv_wrapper.py --shell exit 3
+
+run_grep '^UNKNOWN,' ./csv_wrapper.py --shell exit 5
+
+run_grep '^UNKNOWN,' ./csv_wrapper.py nonexistentcommand arg1 arg2
+
+run_grep '^UNKNOWN,' ./csv_wrapper.py --shell nonexistentcommand arg1 arg2
+
+run_grep '^UNKNOWN,' ./csv_wrapper.py $perl -T check_disk_write.pl --help
+
+echo "Completed $run_count CSV wrapper tests"
+echo
+echo "All CSV wrapper tests completed successfully"
+echo
+echo

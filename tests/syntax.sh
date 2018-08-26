@@ -18,23 +18,26 @@ set -eu
 srcdir_nagios_plugins_syntax="${srcdir:-}"
 srcdir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-echo "================================================================================"
-echo "                              Syntax Checks"
-echo "================================================================================"
-
 cd "$srcdir/..";
 
 . ./tests/utils.sh
 
+section "Perl Syntax Checks"
+
+perl_sync_start_time="$(start_timer)"
+
 for x in *.pl */*.pl; do
-    isExcluded "$x" && continue
+    # this call is expensive, skip it when in CI as using fresh git checkouts
+    if ! is_CI; then
+        isExcluded "$x" && continue
+    fi
     #printf "%-50s" "$x:"
     #$perl -TWc ./$x
     $perl -Tc ./$x
 done
-echo "================================================================================"
-echo "                  All Perl programs passed syntax check"
-echo "================================================================================"
-echo
-echo
+
 srcdir="$srcdir_nagios_plugins_syntax"
+
+time_taken "$perl_syntax_start_time" "Help Checks Completed in $perl_syntax_time_taken secs"
+section2 "All Perl programs passed syntax check"
+echo

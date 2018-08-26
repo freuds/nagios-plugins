@@ -21,52 +21,50 @@ cd "$srcdir/..";
 
 . ./tests/utils.sh
 
+# using Docker now so runs on Mac too
 #[ `uname -s` = "Linux" ] || exit 0
 
-# XXX: NO LONGER USED, DONE AS PART OF LINUX CHECKS NOW
-return 0 &>/dev/null || :
-exit 0
-
-echo "
-# ============================================================================ #
-#                                     Y u m
-# ============================================================================ #
-"
-
-export DOCKER_IMAGE="harisekhon/centos-github"
-export DOCKER_CONTAINER="nagios-plugins-centos-test"
-
-export MNTDIR="/tmp/nagios-plugins"
-
-if ! is_docker_available; then
-    echo 'WARNING: Docker not found, skipping CentOS Yum checks!!!'
+if [ -z "${FORCE_YUM_CHECKS:-}" ]; then
+    # XXX: NO LONGER USED, DONE AS PART OF LINUX CHECKS NOW
+    return 0 &>/dev/null || :
     exit 0
 fi
 
-docker_exec(){
-    local cmd="$@"
-    docker exec "$DOCKER_CONTAINER" $MNTDIR/$*
-}
+section "Y u m"
 
-startupwait=0
+check_docker_available
 
-echo "Setting up CentOS test container"
-DOCKER_OPTS="-v $srcdir/..:$MNTDIR"
-DOCKER_CMD="tail -f /dev/null"
-launch_container "$DOCKER_IMAGE" "$DOCKER_CONTAINER"
-docker exec "$DOCKER_CONTAINER" yum makecache fast
-#docker exec "$DOCKER_CONTAINER" yum install -y net-tools
+startupwait 0
+
+export DOCKER_MOUNT_DIR="/pl"
+
+section2 "Setting up CentOS test container"
+
+distro=centos
+
+export DOCKER_CONTAINER="nagiosplugins_$distro-github_1"
+export COMPOSE_FILE="$srcdir/docker/$distro-github-docker-compose.yml"
+
+docker_compose_pull
+
+docker-compose up -d
+
+docker-compose exec "centos-github" yum makecache fast
+
 if [ -n "${NOTESTS:-}" ]; then
     exit 0
 fi
+
+docker_exec check_yum.pl -C -v -t 60
+
+ERRCODE="0 2" docker_exec check_yum.pl -C --all-updates -v -t 60
+
+docker_exec check_yum.py -C -v -t 60
+
+ERRCODE="0 2" docker_exec check_yum.py -C --all-updates -v -t 60
+
+echo "Completed $run_count Yum tests"
 hr
-docker_exec check_yum.pl -C -v -t 30
-hr
-docker_exec check_yum.pl -C --all-updates -v -t 30 || :
-hr
-docker_exec check_yum.py -C -v -t 30
-hr
-docker_exec check_yum.py -C --all-updates -v -t 30 || :
-hr
-delete_container
+[ -n "${KEEPDOCKER:-}" ] ||
+docker-compose down
 echo; echo

@@ -7,7 +7,7 @@
 #  https://github.com/harisekhon/nagios-plugins
 #
 #  License: see accompanying LICENSE file
-#  
+#
 
 $DESCRIPTION = "Nagios Plugin to check the number of RegionServers that are dead or alive using the HBase Master JSP
 
@@ -15,12 +15,10 @@ Checks the number of dead RegionServers against warning/critical thresholds and 
 
 Recommended to use check_hbase_regionservers.pl instead which uses the HBase Stargate Rest API since parsing the JSP is very brittle and could easily break between versions
 
-Written and tested on CDH 4.3 (HBase 0.94.6-cdh4.3.0), updated and tested on Apache HBase 1.0, 1.1, 1.2
-
-Tested on Apache HBase 1.0.3, 1.1.6, 1.2.2
+Tested on CDH 4.3 (HBase 0.94) and Apache HBase 0.92, 0.94, 0.95, 0.96, 0.98, 0.99, 1.0, 1.1, 1.2, 1.3
 ";
 
-$VERSION = "0.4";
+$VERSION = "0.5.0";
 
 use strict;
 use warnings;
@@ -37,7 +35,7 @@ $ua->agent("Hari Sekhon $progname version $main::VERSION");
 set_port_default(16010);
 
 my $default_warning  = 0;
-my $default_critical = 0;
+my $default_critical = 1;
 $warning  = $default_warning;
 $critical = $default_critical;
 
@@ -81,6 +79,10 @@ foreach(split("\n", $content)){
         $live_servers_section = 1;
     }
     next unless $live_servers_section;
+    if(/Dead Region Servers/){
+        $live_servers_section = 0;
+        last;
+    }
     # HBase 0.94
     #if(/<tr><th>Total: <\/th><td>servers: (\d+)<\/td>/){
     # HBase 1.0

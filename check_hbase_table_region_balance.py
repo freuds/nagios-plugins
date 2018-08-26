@@ -28,7 +28,7 @@ Checks:
 See also check_hbase_region_balance.py which parses the HMaster UI instead of using the Thrift API
 and checks the balance of total regions across all RegionServers
 
-Tested on Hortonworks HDP 2.3 (HBase 1.1.2) and Apache HBase 1.0.3, 1.1.6, 1.2.1, 1.2.2
+Tested on Hortonworks HDP 2.3 (HBase 1.1.2) and Apache HBase 0.95, 0.96, 0.98, 0.99, 1.0, 1.1, 1.2, 1.3
 
 """
 
@@ -71,7 +71,7 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.2.1'
+__version__ = '0.3'
 
 
 class CheckHBaseTableRegionBalance(NagiosPlugin):
@@ -90,7 +90,7 @@ class CheckHBaseTableRegionBalance(NagiosPlugin):
         self.table = None
 
     def add_options(self):
-        self.add_hostoption(name='HBase Thrift Server', default_host='localhost', default_port=9090)
+        self.add_hostoption(name='HBase Thrift', default_host='localhost', default_port=9090)
         self.add_opt('-T', '--table', help='Table to check')
         self.add_opt('-l', '--list-tables', action='store_true', help='List tables and exit')
         self.add_thresholds(default_warning=10, default_critical=20)
@@ -108,7 +108,7 @@ class CheckHBaseTableRegionBalance(NagiosPlugin):
             log.info('connecting to HBase Thrift Server at %s:%s', host, port)
             # cast port to int to avoid low level socket module TypeError for ports > 32000
             self.conn = happybase.Connection(host=host, port=int(port), timeout=10 * 1000)  # ms
-        except (socket.timeout, ThriftException, HBaseIOError) as _:
+        except (socket.error, socket.timeout, ThriftException, HBaseIOError) as _:
             qquit('CRITICAL', 'error connecting: {0}'.format(_))
         tables = self.conn.tables()
         if len(tables) < 1:
@@ -151,7 +151,7 @@ class CheckHBaseTableRegionBalance(NagiosPlugin):
                 server = region['server_name']
                 self.server_region_counts[server] = self.server_region_counts.get(server, 0)
                 self.server_region_counts[server] += 1
-        except (socket.timeout, ThriftException, HBaseIOError) as _:
+        except (socket.error, socket.timeout, ThriftException, HBaseIOError) as _:
             qquit('CRITICAL', _)
         except KeyError as _:
             qquit('UNKNOWN', 'failed to process region information. ' + support_msg_api())

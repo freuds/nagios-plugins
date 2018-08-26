@@ -21,7 +21,7 @@ You may need to upgrade to Cloudera Manager 4.6 for the Standard Edition (free) 
 
 This is still using v1 of the API for compatability purposes
 
-Tested on Cloudera Manager 4.5, 4.6, 5.0.0, 5.7.0";
+Tested on Cloudera Manager 4.5, 4.6, 5.0.0, 5.7.0, 5.12.0";
 
 $VERSION = "0.7";
 
@@ -75,7 +75,7 @@ if($all_metrics){
     }
     @metrics or usage "no valid metrics given";
     @metrics = uniq_array @metrics;
-    vlog_option "metrics", "[ " . join(" ", @metrics) . " ]"; 
+    vlog_option "metrics", "[ " . join(" ", @metrics) . " ]";
 }
 
 validate_thresholds();

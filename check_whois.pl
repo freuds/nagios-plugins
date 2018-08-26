@@ -64,7 +64,7 @@ DISCLAIMER:
 # THERE IS A LOT OF REGEX. EVEN IF YOU ARE A REGEX MASTER YOU CANNOT PREDICT ALL SIDE EFFECTS
 # YOU MUST RELY ON THE ACCOMPANYING TESTS I HAVE WRITTEN IF YOU CHANGE ANYTHING AT ALL
 
-$VERSION = "0.11.1";
+$VERSION = "0.11.6";
 
 use strict;
 use warnings;
@@ -228,6 +228,7 @@ my @valid_statuses = qw/
                         pendingTransfer
                         pendingUpdate
                         published
+                        Publicado
                         registered
                         RENEWPERIOD
                         serverDeleteProhibited
@@ -339,7 +340,7 @@ foreach(@output){
         $results{"expiry"} = "$day-$month-$year";
         vlog2("Expiry: $results{expiry}");
     } elsif(/^\s*Expires on\b\.*:\s*(\d{4})-([A-Za-z]{3})-(\d{1,2}).?\s*$/io or
-            /^(?:Expiration Date|paid-till)\s*:\s*(\d{4})\. ?(\d{2})\. ?(\d{2})\.?\s*$/io) {
+            /^(?:Expiration Date|paid-till)\s*:\s*(\d{4})(?:\.|-) ?(\d{2})(?:\.|-) ?(\d{2})\.?\s*/io) {
         ($day, $month, $year) = ($3, $2, $1);
         $results{"expiry"} = "$day-$month-$year";
         vlog2("Expiry: $results{expiry}");
@@ -418,6 +419,7 @@ foreach(@output){
         $results{"created"} = "$1-$2-$3";
     } elsif (/(?:Updat.+?|Modified|Changed):?\s*(\d+[-\.\/](?:\d+|\w+)[-\.\/]\d+)/io or
              /^(?:[a-z]\s)?\[Record Last Modified\]\s+(.+?)\s*$/){
+        next if /Last update of WHOIS database/i;
         $results{"updated"} = $1;
     } elsif (/^\s*Domain Last Updated Date:\s+\w{3}\s+(\w{3})\s+(\d{1,2})\s+\d{1,2}:\d{1,2}:\d{1,2}\s+\w{3}\s+(\d{4})\s*$/io or
              /^\s*Last Updated\s*:\s*(\w+)\s+(\d{1,2})\s+(\d{4})\.?\s*$/io or
@@ -436,11 +438,14 @@ foreach(@output){
         my $domain_status = strip($1);
         $domain_status =~ s/\s+https?$//i;
         $domain_status =~ s/\s+--.*$//i;
+        $domain_status =~ s/ -//;
         push(@{$results{"status"}}, $domain_status);
     } elsif (/^state:\s*([\w\s,-]+)\s*$/io){
         my @states = split(",", $1);
         foreach(@states){
-            push(@{$results{"status"}}, strip($_));
+            my $domain_status = strip($1);
+            $domain_status =~ s/ -//;
+            push(@{$results{"status"}}, $domain_status);
         }
     } elsif (/^\s*(?:Registrant Organization|Organisation Name|registrant_contact_name)[.:]+\s*(.+?)\s*$/io or
              /^\[Registrant\]\s+(.+?)\s*$/ or
@@ -451,9 +456,9 @@ foreach(@output){
     } elsif (/(?:registrar(?:[ _]name)?|Registered through):\s*(.+?)\s*$/io){
         $results{"registrar"} = $1;
         #$results{"registrar"} =~ s/, Ltd\.? .+$//io;
-    } elsif (/^\s*(?:Admin Email|admin_contact_email)[.:]+\s*($email_regex)\s*$/io){
+    } elsif (/^\s*(?:Admin Email|admin_contact_email|Administrative Contact Email)[.:]+\s*($email_regex)\s*$/io){
         $results{"admin_email"} = $1;
-    } elsif (/^\s*(?:Tech Email|technical_contact_email)[.:]+\s*($email_regex)\s*$/io){
+    } elsif (/^\s*(?:Tech Email|technical_contact_email|Technical Contact Email)[.:]+\s*($email_regex)\s*$/io){
         $results{"tech_email"} = $1;
     }
 }
@@ -562,7 +567,7 @@ foreach(my $i=0;$i<scalar @output;$i++){
                 $no_nameservers_listed = 1;
                 last;
             } else {
-                # exclusion for EU domains since there isn't 
+                # exclusion for EU domains since there isn't
                 # another idea that works for EU domains but this might match match genuine multiple nameservers eg:
                 # nameserver1 nameserver2 nameserver3 nameserver4 on a line from one of the many registrars so not risking it
                 #next if (scalar split(/\s+/, $line2) > 5);

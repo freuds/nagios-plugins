@@ -21,7 +21,7 @@ Nagios Plugin to check the deployed version of an HBase HMaster matches what's e
 This is also used in the accompanying test suite to ensure we're checking the right version of HBase
 for compatibility for all my other HBase nagios plugins.
 
-Tested on Apache HBase 1.0.3, 1.1.6, 1.2.2
+Tested on Apache HBase 0.92, 0.94, 0.95, 0.96, 0.98, 0.99, 1.0, 1.1, 1.2, 1.3
 
 """
 
@@ -52,7 +52,7 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.2'
+__version__ = '0.3'
 
 
 class CheckHBaseMasterVersion(VersionNagiosPlugin):
@@ -109,6 +109,8 @@ class CheckHBaseMasterVersion(VersionNagiosPlugin):
         except (AttributeError, TypeError):
             qquit('UNKNOWN', 'failed to find parse HBase output. {0}\n{1}'\
                              .format(support_msg(), traceback.format_exc()))
+        # strip things like -hadoop2 at end
+        version = version.split('-')[0]
         return version
 
     @staticmethod

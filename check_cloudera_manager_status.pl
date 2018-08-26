@@ -19,7 +19,7 @@ You may need to upgrade to Cloudera Manager 4.6 for the Standard Edition (free) 
 
 This is still using v1 of the API for compatability purposes
 
-Tested on Cloudera Manager 5.0.0, 5.7.0";
+Tested on Cloudera Manager 5.0.0, 5.7.0, 5.12.0";
 
 $VERSION = "0.3";
 
@@ -89,7 +89,7 @@ if(($cluster and $service) or defined($cm_mgmt)){
         if($verbose){
             $msg .= " role '$role'";
         } else {
-            $msg .= " role '" . $json->{"type"} . "'"; 
+            $msg .= " role '" . $json->{"type"} . "'";
         }
         $state = $json->{"roleState"};
     } else {

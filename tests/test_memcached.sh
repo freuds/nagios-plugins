@@ -21,53 +21,81 @@ cd "$srcdir/..";
 
 . ./tests/utils.sh
 
-echo "
-# ============================================================================ #
-#                               M e m c a c h e d
-# ============================================================================ #
-"
+section "M e m c a c h e d"
 
-export MEMCACHED_VERSIONS="${@:-${MEMCACHED_VERSIONS:-latest 1.4}}"
+export MEMCACHED_VERSIONS="${@:-${MEMCACHED_VERSIONS:-1.4 1.5 latest}}"
 
 MEMCACHED_HOST="${DOCKER_HOST:-${MEMCACHED_HOST:-${HOST:-localhost}}}"
 MEMCACHED_HOST="${MEMCACHED_HOST##*/}"
 MEMCACHED_HOST="${MEMCACHED_HOST%%:*}"
 export MEMCACHED_HOST
 
-export MEMCACHED_PORT=11211
+export MEMCACHED_PORT_DEFAULT=11211
 
 check_docker_available
+
+trap_debug_env memcached
 
 startupwait 1
 
 test_memcached(){
     local version="$1"
-    echo "Setting up Memcached $version test container"
-    #launch_container "$DOCKER_IMAGE:$version" "$DOCKER_CONTAINER" $MEMCACHED_PORT
+    section2 "Setting up Memcached $version test container"
+    docker_compose_pull
     VERSION="$version" docker-compose up -d
-    memcached_port="`docker-compose port "$DOCKER_SERVICE" "$MEMCACHED_PORT" | sed 's/.*://'`"
-    when_ports_available "$startupwait" "$MEMCACHED_HOST" "$memcached_port"
+    hr
+    echo "getting Memcached dynamic port mapping:"
+    docker_compose_port Memcached
+    hr
+    when_ports_available "$MEMCACHED_HOST" "$MEMCACHED_PORT"
     hr
     echo "creating test Memcached key-value"
-    echo -ne "add myKey 0 100 4\r\nhari\r\n" | nc "$MEMCACHED_HOST" "$memcached_port"
+    echo -ne "add myKey 0 100 4\r\nhari\r\n" | nc "$MEMCACHED_HOST" "$MEMCACHED_PORT"
     echo done
     if [ -n "${NOTESTS:-}" ]; then
         exit 0
     fi
     hr
+    if [ "$version" = "latest" ]; then
+        version=".*"
+        echo "expecting version '$version'"
+    fi
+    hr
+    # --version doesn't work in older versions eg. 1.4
+    set +e
+    found_version="$(docker-compose exec "$DOCKER_SERVICE" /usr/local/bin/memcached -V | tr -d '\r' | awk '{print $2}')"
+    set -e
+    if [ -z "$found_version" ]; then
+        echo "FAILED to find memcached version"
+    fi
+    echo "found Memcached version '$found_version'"
+    hr
+    if [[ "$found_version" =~ $version* ]]; then
+        echo "$name docker version matches expected (found '$found_version', expected '$version')"
+    else
+        echo "Docker container version does not match expected version! (found '$found_version', expected '$version')"
+        exit 1
+    fi
+    hr
     # MEMCACHED_HOST obtained via .travis.yml
-    $perl -T ./check_memcached_write.pl -P "$memcached_port" -v
+    run $perl -T ./check_memcached_write.pl -v
+
+    run_conn_refused $perl -T ./check_memcached_write.pl -v
+
+    run $perl -T ./check_memcached_key.pl -k myKey -e hari -v
+
+    run_conn_refused $perl -T ./check_memcached_key.pl -k myKey -e hari -v
+
+    run $perl -T ./check_memcached_stats.pl -w 15 -c 20 -v
+
+    run_conn_refused $perl -T ./check_memcached_stats.pl -w 15 -c 20 -v
+
+    echo "Completed $run_count Memcached tests"
     hr
-    $perl -T ./check_memcached_key.pl -P "$memcached_port" -k myKey -e hari -v
-    hr
-    $perl -T ./check_memcached_stats.pl -P "$memcached_port" -w 15 -c 20 -v
-    hr
-    #delete_container
+    [ -n "${KEEPDOCKER:-}" ] ||
     docker-compose down
     hr
     echo
 }
 
-for version in $(ci_sample $MEMCACHED_VERSIONS); do
-    test_memcached $version
-done
+run_test_versions Memcached

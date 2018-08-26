@@ -13,32 +13,30 @@
 #                            Deb Package Requirements
 # ============================================================================ #
 
-# needed to fetch and build CPAN modules and fetch the library submodule at end of build
-build-essential
+perl
+python
+python-pip
+python-setuptools
+
+# needed to fetch the library submodule at end of build
+# and also for check_git_checkout_branch.pl and Git-Python / check_git_checkout_branch.py
 git
+
 libwww-perl
-wget
 
 # ethtool needed for ./check_linux_interface.pl
 ethtool
+net-tools
 
-# for LWP::Authenticate - prompts for realm + KDC, use libkrb5-dev instead
-#krb5-config
-libkrb5-dev
+# used for tests
+curl
 
-# for DBD::mysql as well as headers to build DBD::mysql if building from CPAN
+# either of these should do to ensure ping command is present for find_active_server.py's ping mode
+iputils-ping
+#inetutils-ping
+
 libdbd-mysql-perl
-libmysqlclient-dev
-
-# needed to build Net::SSLeay for IO::Socket::SSL for Net::LDAPS
-libssl-dev
-libsasl2-dev
-
-# for XML::Simple building
-libexpat1-dev
-
-# needed for ndg-httpsclient upgrade
-libffi-dev
+python-mysqldb
 
 # for check_ssl_cert.pl
 openssl
@@ -49,9 +47,8 @@ python-pyasn1
 # Class::Accessor pre-packaged
 #libclass-accessor-perl
 
-python-setuptools
-python-pip
-python-dev
+# has become python3-jenkins on ubuntu now - leave to pip
+#python-jenkins
 
 # for Cassandra's Python driver
 #libev4
@@ -61,3 +58,9 @@ python-dev
 # for check_whois.pl - looks like this has been removed from repos :-/
 # trying in Makefile with error suppression
 #jwhois
+
+# for 'make test'
+procps
+
+# for timezone checks
+tzdata

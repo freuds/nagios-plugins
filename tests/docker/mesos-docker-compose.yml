@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   mesos:
     extends:
@@ -22,3 +22,8 @@ services:
     ports:
       - 5050
       - 5051
+    networks:
+      - mesos
+
+networks:
+  mesos:

@@ -22,20 +22,16 @@ cd "$srcdir/.."
 
 . "$srcdir/utils.sh"
 
-echo "
-# ============================================================================ #
-#                                   S p a r k
-# ============================================================================ #
-"
+section "S p a r k"
 
-export SPARK_VERSIONS="${@:-${SPARK_VERSIONS:-latest 1.3 1.4 1.5 1.6}}"
+export SPARK_VERSIONS="${@:-${SPARK_VERSIONS:-1.3 1.4 1.5 1.6 latest}}"
 
 SPARK_HOST="${DOCKER_HOST:-${SPARK_HOST:-${HOST:-localhost}}}"
 SPARK_HOST="${SPARK_HOST##*/}"
 SPARK_HOST="${SPARK_HOST%%:*}"
 export SPARK_HOST
-export SPARK_MASTER_PORT="${SPARK_MASTER_PORT:-8080}"
-export SPARK_WORKER_PORT="${SPARK_WORKER_PORT:-8081}"
+export SPARK_MASTER_PORT_DEFAULT=8080
+export SPARK_WORKER_PORT_DEFAULT=8081
 
 export DOCKER_IMAGE="harisekhon/spark"
 export DOCKER_CONTAINER="nagios-plugins-spark-test"
@@ -44,44 +40,91 @@ startupwait 15
 
 check_docker_available
 
+trap_debug_env spark
+
 test_spark(){
     local version="$1"
-    hr
-    echo "Setting up Spark $version test container"
-    hr
-    #launch_container "$DOCKER_IMAGE:$version" "$DOCKER_CONTAINER" $SPARK_MASTER_PORT $SPARK_WORKER_PORT
+    section2 "Setting up Spark $version test container"
     docker-compose down &>/dev/null
+    docker_compose_pull
+    if [ -z "${KEEPDOCKER:-}" ]; then
+        docker-compose down || :
+    fi
     VERSION="$version" docker-compose up -d
-    spark_master_port="`docker-compose port "$DOCKER_SERVICE" "$SPARK_MASTER_PORT" | sed 's/.*://'`"
-    spark_worker_port="`docker-compose port "$DOCKER_SERVICE" "$SPARK_WORKER_PORT" | sed 's/.*://'`"
-    local SPARK_MASTER_PORT="$spark_master_port"
-    local SPARK_WORKER_PORT="$spark_worker_port"
-    when_ports_available $startupwait $SPARK_HOST $SPARK_MASTER_PORT $SPARK_WORKER_PORT
+    hr
+    echo "getting Spark dynamic port mappings:"
+    printf "Spark Master Port => "
+    export SPARK_MASTER_PORT="`docker-compose port "$DOCKER_SERVICE" "$SPARK_MASTER_PORT_DEFAULT" | sed 's/.*://'`"
+    echo "$SPARK_MASTER_PORT"
+    printf "Spark Worker Port => "
+    export SPARK_WORKER_PORT="`docker-compose port "$DOCKER_SERVICE" "$SPARK_WORKER_PORT_DEFAULT" | sed 's/.*://'`"
+    echo "$SPARK_WORKER_PORT"
+    hr
+    when_ports_available "$SPARK_HOST" "$SPARK_MASTER_PORT" "$SPARK_WORKER_PORT"
+    hr
+    when_url_content "http://$SPARK_HOST:$SPARK_MASTER_PORT" "Spark Master"
+    hr
+    when_url_content "http://$SPARK_HOST:$SPARK_WORKER_PORT" "Spark Worker"
+    hr
     if [ -n "${NOTESTS:-}" ]; then
         exit 0
     fi
     if [ "$version" = "latest" ]; then
-        local version=".*"
+        echo "latest version, fetching latest version from DockerHub master branch"
+        local version="$(dockerhub_latest_version spark)"
+        echo "expecting version '$version'"
     fi
     hr
-    ./check_spark_master_version.py -e "$version"
+    run ./check_spark_master_version.py -e "$version"
+
+    run_fail 2 ./check_spark_master_version.py -e "fail-version"
+
+    run_conn_refused ./check_spark_master_version.py -e "$version"
+
+    run ./check_spark_worker_version.py -e "$version"
+
+    run_fail 2 ./check_spark_worker_version.py -e "fail-version"
+
+    run_conn_refused ./check_spark_worker_version.py -e "$version"
+
+    echo "trying check_spark_cluster.pl for up to $startupwait secs to give cluster worker a chance to initialize:"
+    retry $startupwait ./check_spark_cluster.pl -c 1: -v
     hr
-    ./check_spark_worker_version.py -e "$version"
+
+    run $perl -T ./check_spark_cluster.pl -c 1: -v
+
+    run_conn_refused $perl -T ./check_spark_cluster.pl -c 1: -v
+
+    run $perl -T ./check_spark_cluster_dead_workers.pl -w 0 -c 1 -v
+
+    run_conn_refused $perl -T ./check_spark_cluster_dead_workers.pl -w 1 -c 1 -v
+
+    run $perl -T ./check_spark_cluster_memory.pl -w 80 -c 90 -v
+
+    run_conn_refused $perl -T ./check_spark_cluster_memory.pl -w 80 -c 90 -v
+
+    run $perl -T ./check_spark_worker.pl -w 80 -c 90 -v
+
+    run_conn_refused $perl -T ./check_spark_worker.pl -w 80 -c 90 -v
+
+    if [ -n "${KEEPDOCKER:-}" ]; then
+        echo
+        echo "Completed $run_count Spark tests"
+        return
+    fi
+    echo "Now killing Spark Worker to check for worker failure detection:"
+    docker exec "$DOCKER_CONTAINER" pkill -9 -f org.apache.spark.deploy.worker.Worker
     hr
-    $perl -T ./check_spark_cluster.pl -c 1: -v
+    echo "Now waiting for Spark Worker failure to be detected:"
+    retry 10 ! $perl -T ./check_spark_cluster_dead_workers.pl
+    run++
     hr
-    $perl -T ./check_spark_cluster_dead_workers.pl -w 1 -c 1 -v
+    echo "Completed $run_count Spark tests"
     hr
-    $perl -T ./check_spark_cluster_memory.pl -w 80 -c 90 -v
-    hr
-    $perl -T ./check_spark_worker.pl -w 80 -c 90 -v
-    hr
-    #delete_container
+    [ -n "${KEEPDOCKER:-}" ] ||
     docker-compose down
     hr
     echo
 }
 
-for version in $SPARK_VERSIONS; do
-    test_spark $version
-done
+run_test_versions Spark

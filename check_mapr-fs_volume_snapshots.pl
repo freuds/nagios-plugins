@@ -19,7 +19,7 @@ Checks:
 - most recent snapshot occurred within the last x minutes (--warning/critical thresholds, optional)
 - perfdata is also output for graphing
 
-Tested on MapR 4.0.1, 5.1.0";
+Tested on MapR 4.0.1, 5.1.0, 5.2.1";
 
 $VERSION = "0.1";
 
@@ -65,6 +65,8 @@ my $url = "/volume/snapshot/list";
 $url .= "?" if ($cluster or $volume or not ($debug or $verbose > 3));
 $url .= "cluster=$cluster&" if $cluster;
 $url .= "filter=[volumename==$volume]&" if $volume;
+# TODO: check snapshotused vs cumulativeReclaimSizeMB, and snapshotcount
+# dsu field was documented but not found in MapR 4.0.1's API, found cumulativeReclaimSizeMB instead
 $url .= "columns=volumename,volumepath,snapshotname,cumulativeReclaimSizeMB,creationtime,expirytime" unless ($debug or $verbose > 3);
 $url =~ s/&$//;
 

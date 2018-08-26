@@ -49,15 +49,16 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.1'
+__version__ = '0.2.2'
+
 
 class CheckMesosSlave(NagiosPlugin):
 
-    def __init__(self):
-        # Python 2.x
-        super(CheckMesosSlave, self).__init__()
-        # Python 3.x
-        # super().__init__()
+#    def __init__(self):
+#        # Python 2.x
+#        super(CheckMesosSlave, self).__init__()
+#        # Python 3.x
+#        # super().__init__()
 
     def add_options(self):
         self.add_hostoption(name='Mesos Master', default_host='localhost', default_port=5050)
@@ -84,13 +85,16 @@ class CheckMesosSlave(NagiosPlugin):
         log.debug("response: %s %s", req.status_code, req.reason)
         log.debug("content:\n{0}\n{1}\n{2}".format('='*80, req.content.strip(), '='*80))
         if req.status_code != 200:
+            if req.status_code == 404:
+                qquit('CRITICAL', '%s %s (did you point this at the correct Mesos Master?)'
+                                  % (req.status_code, req.reason))
             qquit('CRITICAL', "Non-200 response! %s %s" % (req.status_code, req.reason))
         content = req.content
         if not isJson(content):
             qquit('UNKNOWN', 'invalid JSON returned by Mesos Master')
         data = json.loads(content)
         if log.isEnabledFor(logging.DEBUG):
-            log.debug('\n' + jsonpp(data))
+            log.debug('\n%s', jsonpp(data))
         slaves = {}
         regex = re.compile(r'^slave\(\d+\)\@(.+):\d+')
         try:

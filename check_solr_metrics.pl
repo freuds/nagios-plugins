@@ -17,7 +17,7 @@ Additionally, can drill down to a specific --stat to collect from that metric.
 
 Optional thresholds apply if specifying a single --stat.
 
-Tested on Solr 3.1, 3.6.2 and Solr / SolrCloud 4.7.2, 4.10.3, 5.4.0, 5.5.0, 6.0.0, 6.1.0, 6.2.0";
+Tested on Solr 3.1, 3.6.2 and Solr / SolrCloud 4.7, 4.10, 5.4, 5.5, 6.0, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.0, 7.1";
 
 # Some useful metrics to collect
 #
@@ -29,7 +29,7 @@ Tested on Solr 3.1, 3.6.2 and Solr / SolrCloud 4.7.2, 4.10.3, 5.4.0, 5.5.0, 6.0.
 # Replication status
 # Synthetic queries
 
-our $VERSION = "0.4.1";
+our $VERSION = "0.5.2";
 
 use strict;
 use warnings;
@@ -125,7 +125,7 @@ if($list_keys){
 }
 
 unless(isHash($mbeans[1]) and %{$mbeans[1]}){
-    quit "UNKNOWN", "no metrics returned for category '$category'" . ( defined($key) ? " key '$key'" : "" ). ", did you specify a correct category as listed by --list-categories" . ( defined($key) ? " and correct key as listed by --list-keys?" : "");
+    quit "UNKNOWN", "no metrics returned for category '$category'" . ( defined($key) ? " key '$key'" : "" ). ", did you specify a correct category as listed by --list-categories" . ( defined($key) ? " and correct key as listed by --list-keys?" : "?");
 }
 
 #my $key_found  = 0;
@@ -157,7 +157,7 @@ foreach (my $i = 1; $i < scalar @mbeans; $i+=2){
         if(%keys3){
             foreach (sort keys %keys3){
                 if($stat){
-                    next unless $_ eq $stat;
+                    next unless $_ =~ /^(.*\.)?$stat$/;
                 }
                 $stat_found = 1;
                 my $value = $keys3{$_};
@@ -167,6 +167,8 @@ foreach (my $i = 1; $i < scalar @mbeans; $i+=2){
                     if(defined($stats{"${key2}.$_"})){
                         code_error "duplicate key '${key2}.$_' detected";
                     }
+                    # normalize new 7.x format back to old short format
+                    $_ =~ s/^.*\.//;
                     vlog2 "$key2 => $_  = $value";
                     $stats{$key2}{$_} = $value;
                 } elsif($stat and not isFloat($value)){
@@ -208,7 +210,7 @@ foreach my $key (sort keys %stats){
     foreach(sort keys %{$stats{$key}}){
         #print "$_=$stats{$_}\n";
         $msg  .= "$_=$stats{$key}{$_}, ";
-        $msg2 .= " '${key} => $_'=$stats{$key}{$_}";
+        $msg2 .= " '${key} $_'=$stats{$key}{$_}";
         if($num_stats == 1){
             check_thresholds($stats{$key}{$_});
         }

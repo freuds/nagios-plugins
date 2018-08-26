@@ -24,56 +24,60 @@ cd "$srcdir/.."
 
 is_travis && exit 0
 
-echo "
-# ============================================================================ #
-#                                  Z a l o n i
-# ============================================================================ #
-"
+section "Z a l o n i"
 
 export ZALONI_BEDROCK_PORT="${ZALONI_BEDROCK_PORT:-8080}"
 
-if [ -n "${ZALONI_BEDROCK_HOST:-}" ]; then
+if [ -z "${ZALONI_BEDROCK_PASSWORD:-}" ]; then
+    echo "WARNING: ZALONI_BEDROCK_PASSWORD not defined, defaulting to 'test'"
+    export ZALONI_BEDROCK_PASSWORD=test
+    echo
+fi
+
+trap_debug_env Zaloni
+
+echo "running conection refused checks first:"
+echo
+run_conn_refused ./check_zaloni_bedrock_ingestion.py -l
+
+run_conn_refused ./check_zaloni_bedrock_workflow.py --all -v --min-runtime 0
+
+
+if [ -z "${ZALONI_BEDROCK_HOST:-}" ]; then
+    echo "WARNING: \$ZALONI_BEDROCK_HOST not set, skipping real Zaloni checks"
+else
     if which nc &>/dev/null && ! echo | nc -w 1 "$ZALONI_BEDROCK_HOST" "$ZALONI_BEDROCK_PORT"; then
         echo "WARNING: Zaloni Bedrock host $ZALONI_BEDROCK_HOST:$ZALONI_BEDROCK_PORT not up, skipping Zaloni checks"
     else
-        set +e
-        ./check_zaloni_bedrock_ingestion.py -l
-        check_exit_code 3
-        hr
-        ./check_zaloni_bedrock_ingestion.py -v -r 600 -a 1440
-        check_exit_code 0 2
-        hr
-        set -e
+        run_fail 3 ./check_zaloni_bedrock_ingestion.py -l
 
+        run_fail "0 2" ./check_zaloni_bedrock_ingestion.py -v -r 600 -a 1440
+
+        set +o pipefail
         ./check_zaloni_bedrock_workflow.py -l |
         tail -n +6 |
         sed 's/.*[[:space:]]\{4\}\([[:digit:]]\+\)[[:space:]]\{4\}.*/\1/' |
         while read workflow_id; do
-            set +e
-            ./check_zaloni_bedrock_workflow.py -I "$workflow_id" -v --min-runtime 0
-            check_exit_code 0 2
-            set -e
-            hr
+            # TODO: fix - won't increment due to subshell
+            run_fail "0 2" ./check_zaloni_bedrock_workflow.py -I "$workflow_id" -v --min-runtime 0
         done
 
         ./check_zaloni_bedrock_workflow.py -l |
         tail -n +6 |
         sed 's/[[:space:]]\{4\}[[:digit:]]\+[[:space:]]\{4\}.*//' |
         while read workflow_name; do
-            set +e
-            ./check_zaloni_bedrock_workflow.py -N "$workflow_name" -v --min-runtime 0
-            check_exit_code 0 2
-            set -e
-            hr
+            # TODO: fix - won't increment due to subshell
+            run_fail "0 2" ./check_zaloni_bedrock_workflow.py -N "$workflow_name" -v --min-runtime 0
         done
-        set +e
-        ./check_zaloni_bedrock_workflow.py --all -v --min-runtime 0
-        check_exit_code 0 2
-        set -e
-    fi
-else
-    echo "WARNING: \$ZALONI_BEDROCK_HOST not set, skipping Zaloni checks"
-fi
 
+        run_fail "0 2" ./check_zaloni_bedrock_workflow.py --all -v --min-runtime 0
+
+    fi
+fi
+echo
+echo "Completed $run_count Zaloni tests"
+echo
+echo "All Zaloni tests passed successfully"
+untrap
 echo
 echo

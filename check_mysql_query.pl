@@ -9,20 +9,20 @@
 #  License: see accompanying LICENSE file
 #
 
-$DESCRIPTION = "Nagios Plugin to check arbitrary MySQL queries against regex matches or numerical ranges, with perfdata support
+$DESCRIPTION = "Nagios Plugin to check arbitrary MySQL queries against regex matches or numerical ranges, with perfdata support for graphing
 
-It looks like a similar plugin has now been added to the standard Nagios Plugins collection, although this one still has more features.
+It looks like a similar plugin has now been added to the standard Nagios Plugins collection, although this one still has more features
 
-Only the first row returned is considered for the result so your SQL query should take that in to account.
+Only the first row returned is considered for the result so your SQL query should take that in to account
 
 DO NOT ADD a semi-colon to the end of your query in Nagios, although this plugin can handle this fine and it works on the command line, in Nagios the command will end up being prematurely terminated and result in a null critical error that is hard to debug and that this plugin cannot catch since it's raised by the shell before this plugin is executed
 
-Tested on MySQL 5.0, 5.1, 5.5, 5.6, 5.7
+Tested on MySQL 5.0, 5.1, 5.5, 5.6, 5.7, 8.0 and MariaDB 5.5, 10.1, 10.2, 10.3
 ";
 
 # TODO: add retry switch if valid below threshold
 
-$VERSION = "1.1.5";
+$VERSION = "1.1.7";
 
 use strict;
 use warnings;
@@ -66,7 +66,7 @@ env_var("MYSQL_DATABASE", \$database);
     "d|database=s"  => [ \$database, "MySQL database (\$MYSQL_DATABASE)" ],
     "s|mysql-socket=s" => [ \$mysql_socket,    "MySQL socket file through which to connect (defaults: " . join(", ", @default_mysql_sockets) . ")" ],
     "q|query=s"     => [ \$query,    "MySQL query to execute" ],
-    "f|field=s"     => [ \$field,    "Field number/name to check the results of (defaults to '1')" ],
+    "f|field=s"     => [ \$field,    "Field name / number to check the results of (defaults to '1' for the first field)" ],
     "e|epoch"       => [ \$epoch,    "Subtract result from current time in epoch format from result (useful for timestamp based comparisons)" ],
     "m|message=s"   => [ \$message,  "Message to output after result. Can take a printf string with a single substitution (defaults to '$default_message')" ],
     "n|message-prepend" => [ \$message_pre, "Display message before rather than after result (prepend)" ],
@@ -90,7 +90,7 @@ if($host){
     unless($mysql_socket){
         foreach(@default_mysql_sockets){
             if( -e $_ ){
-                vlog3 "found mysql socket '$_'";
+                vlog2 "found mysql socket '$_'";
                 $mysql_socket = $_;
                 last;
             }
@@ -124,10 +124,10 @@ $graph = 1 if $label;
 $graph = 1 if $units;
 if($graph){
     unless($label){
+        vlog2("graphing enabled, defaulting label to field: $field");
         $label = "$field";
-        $label = validate_label($label);
-        vlog2("graphing enabled, defaulting label to $label");
     }
+    $label = validate_label($label);
 }
 
 vlog2;
@@ -165,17 +165,29 @@ sub execute_query{
     my $result;
     if($field =~ /^\d+$/){
         my @data = $sth->fetchrow_array();
-        # TODO: better formatting
-        print "result row:  " if ($verbose >= 3);
-        foreach(@data){
-            print "$_ " if ($_ and $verbose >= 3);
+        if ($verbose >= 3){
+            # Data::Dumper makes this ugly as it dumps this out to dozens of lines of $VAR<N> = 'Y';
+            # deferred import of Data::Dumper to here so you don't need to have Data::Dumper installed if not running in debug mode / verbose >= 3
+            use Data::Dumper;
+            vlog3 "Result Row array:\n" . Dumper(@data);
+            # looks nicer and more concise but not as clear in quickly determining field numbers
+            #my $row_str = "Result row:  ";
+            #vlog3 "Result row:  " . Dumper(@data);
+            #foreach(@data){
+            #    $row_str .= "$_ " if $_;
+            #}
+            #vlog3 $row_str
         }
-        print "\n" if ($verbose >= 3);
         defined($data[$field-1]) or quit "CRITICAL", "couldn't find field $field in result from query \"$sql\"";
         $result = $data[$field-1];
     } else {
         my $data;
         $data = $sth->fetchrow_hashref();
+        if($verbose >= 3){
+            # deferred import of Data::Dumper to here so you don't need to have Data::Dumper installed if not running in debug mode / verbose >= 3
+            use Data::Dumper;
+            vlog3 "Result Row:  " . Dumper($data);
+        }
         unless(defined($$data{$field})){
             my $errstr = "couldn't find '$field' field in result from query \"$sql\" (fields returned: ";
             foreach(sort keys %$data){

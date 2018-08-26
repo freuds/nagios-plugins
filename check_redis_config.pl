@@ -7,7 +7,7 @@
 #  https://github.com/harisekhon/nagios-plugins
 #
 #  License: see accompanying LICENSE file
-#  
+#
 
 $DESCRIPTION = "Nagios Plugin to check a Redis server's running config against a given configuration file
 
@@ -24,7 +24,7 @@ Detects password in this order of priority (highest first):
 
 Inspired by check_mysql_config.pl (also part of the Advanced Nagios Plugins Collection)
 
-Tested on Redis 2.4.10, 2.8.19, 3.0.7, 3.2.0";
+Tested on Redis 2.4, 2.6, 2.8, 3.0, 3.2, 4.0";
 
 $VERSION = "0.8.4";
 

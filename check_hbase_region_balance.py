@@ -22,7 +22,7 @@ See also check_hbase_table_region_balance.py which uses the HBase Thrift API and
 region balance for a given table to detect table hotspotting, or region balance for global region
 counts like this program.
 
-Tested on Hortonworks HDP 2.3 (HBase 1.1.2) and Apache HBase 1.0.3, 1.1.6, 1.2.1, 1.2.2
+Tested on Hortonworks HDP 2.3 (HBase 1.1.2) and Apache HBase 0.95, 0.96, 0.98, 0.99, 1.0, 1.1, 1.2, 1.3
 
 """
 
@@ -56,7 +56,7 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.1'
+__version__ = '0.1.1'
 
 
 class CheckHBaseRegionBalance(NagiosPlugin):
@@ -107,7 +107,8 @@ class CheckHBaseRegionBalance(NagiosPlugin):
         self.msg += ' min_regions={0} max_regions={1}'.format(self.server_min_regions[1], self.server_max_regions[1])
 
     def calculate_imbalance(self):
-        max_imbalance = (self.server_max_regions[1] - self.server_min_regions[1]) / max(self.server_max_regions[1], 1) * 100
+        max_imbalance = (self.server_max_regions[1] - self.server_min_regions[1]) \
+                        / max(self.server_max_regions[1], 1) * 100
         return '{0:.2f}'.format(max_imbalance)
 
     def parse_output(self, content):

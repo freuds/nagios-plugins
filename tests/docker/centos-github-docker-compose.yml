@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   centos-github:
     extends:
@@ -20,3 +20,9 @@ services:
       service: common
     image: harisekhon/centos-github:${VERSION:-latest}
     command: tail -f /dev/null
+    networks:
+      - centos_github
+    privileged: true
+
+networks:
+  centos_github:

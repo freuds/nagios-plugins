@@ -9,7 +9,7 @@
 #
 
 """
-Nagios plugin to test for Yum updates on RedHat/CentOS Linux.
+Nagios plugin to test for Yum updates on RedHat / CentOS Linux.
 
 Can optionally alert on any available updates as well as just security related updates
 
@@ -33,7 +33,7 @@ from optparse import OptionParser
 
 __author__ = "Hari Sekhon"
 __title__ = "Nagios Plugin for Yum updates on RedHat/CentOS systems"
-__version__ = "0.7.7"
+__version__ = "0.8.8"
 
 # Standard Nagios return codes
 OK = 0
@@ -46,7 +46,7 @@ DEFAULT_TIMEOUT = 30
 support_msg = "Please make sure you have upgraded to the latest version from " + \
               "https://github.com/harisekhon/nagios-plugins. If the problem persists, " + \
               "please raise a ticket at https://github.com/harisekhon/nagios-plugins/issues "+ \
-	      "with the full -vvv output"
+              "with the full -vvv output"
 
 def end(status, message):
     """Exits the plugin with first arg as the return code and the second
@@ -91,6 +91,8 @@ class YumTester(object):
         self.no_warn_on_lock = False
         self.enable_repo = ""
         self.disable_repo = ""
+        self.disable_plugin = ""
+        self.yum_config = ""
         self.timeout = DEFAULT_TIMEOUT
         self.verbosity = 0
         self.warn_on_any_update = False
@@ -125,7 +127,7 @@ class YumTester(object):
         """runs a system command and returns
         an array of lines of the output"""
 
-        if cmd == "" or cmd is None:
+        if not cmd:
             end(UNKNOWN, "Internal python error - " \
                        + "no cmd supplied for run function")
 
@@ -139,17 +141,29 @@ class YumTester(object):
             for repo in self.disable_repo.split(","):
                 cmd += " --disablerepo=%s" % repo
 
+        if self.disable_plugin:
+            # --disableplugin can take a comma separated list directly
+            #for plugin in self.disable_plugin.split(","):
+                #cmd += " --disableplugin=%s" % plugin
+            cmd += " --disableplugin=%s" % self.disable_plugin
+
+        if self.yum_config:
+            for repo in self.yum_config.split(","):
+                cmd += " --config=%s" % repo
+
         self.vprint(3, "running command: %s" % cmd)
 
         if OLD_PYTHON:
             self.vprint(3, "subprocess not available, probably old python " \
                          + "version, using shell instead")
+            os.environ['LANG'] = "en_US"
             returncode, stdout = commands.getstatusoutput(cmd)
             if returncode >= 256:
                 returncode = returncode / 256
         else:
             try:
-                process = Popen(cmd.split(), stdin=PIPE, stdout=PIPE, stderr=STDOUT)
+                env = {'LANG': 'en_US'}
+                process = Popen(cmd.split(), stdin=PIPE, stdout=PIPE, stderr=STDOUT, env=env)
             except OSError, error:
                 error = str(error)
                 if error == "No such file or directory":
@@ -158,10 +172,12 @@ class YumTester(object):
                                                   % (cmd.split()[0], error))
 
             output = process.communicate()
+            # for using debug outputs, either do not comment above line or explicitly set exit code below
+            #output = [open(os.path.dirname(__file__) + '/test_input.txt').read(), '']
             returncode = process.returncode
             stdout = output[0]
 
-        if stdout is None or stdout == "":
+        if not stdout:
             end(UNKNOWN, "No output from utility '%s'" % cmd.split()[0])
 
         self.vprint(3, "Returncode: '%s'\nOutput: '%s'" \
@@ -178,10 +194,9 @@ class YumTester(object):
         with an appropriate message if any are found"""
 
         if returncode == 0:
-            if "You must run this command as root" in output[2]:
-                end(UNKNOWN, "You must run this plugin as root")
-            else:
-                pass
+            for line in output:
+                if "You must run this command as root" in line:
+                    end(UNKNOWN, "You must run this plugin as root")
         elif returncode == 100:
             # Updates Available
             pass
@@ -271,7 +286,7 @@ class YumTester(object):
 
         output = self.run(cmd)
 
-        output2 = "\n".join(output).split("\n\n")
+        output2 = [_ for _ in "\n".join(output).split("\n\n") if  _]
         if self.verbosity >= 4:
             for section in output2:
                 print "\nSection:\n%s\n" % section
@@ -287,8 +302,10 @@ class YumTester(object):
             # the loading and setting up of repositories
             pass
         else:
-            for _ in output2[1].split("\n"):
-                if len(_.split()) > 1 and _[0:1] != " ":
+            for line in output2[1].split("\n"):
+                if len(line.split()) > 1 and \
+                   line[0:1] != " " and \
+                   "Obsoleting Packages" not in line:
                     number_packages += 1
 
         try:
@@ -303,6 +320,8 @@ class YumTester(object):
         # to fail on error rather than pass silently leaving you with an
         # insecure system
         count = 0
+        re_kernel_security_update = re.compile('^Security: kernel-.+ is an installed security update')
+        re_kernel_update = re.compile('^Security: kernel-.+ is the currently running version')
         re_package_format = \
                 re.compile(r'^.+\.(i[3456]86|x86_64|noarch)\s+.+\s+.+$')
         # This is to work around a yum truncation issue effectively changing
@@ -311,7 +330,19 @@ class YumTester(object):
         # and raise an unknown error on anything else for maximum security
         #re_package_format_truncated = \
         #        re.compile("^[\w-]+-kmod-\d[\d\.-]+.*\s+.+\s+.+$")
+        obsoleting_packages = False
         for line in output:
+            if ' excluded ' in line:
+                continue
+            elif obsoleting_packages and line[0:1] == " ":
+                continue
+            elif "Obsoleting Packages" in line:
+                obsoleting_packages = True
+                continue
+            elif re_kernel_security_update.match(line):
+                end(WARNING, 'Kernel security update is installed but requires a reboot')
+            elif re_kernel_update.match(line):
+                continue
             if re_package_format.match(line):
                 count += 1
         if count != number_packages:
@@ -336,6 +367,7 @@ class YumTester(object):
         re_summary_rhel6 = re.compile(r'(\d+) package\(s\) needed for security, out of (\d+) available')
         re_no_sec_updates = \
                 re.compile(r'No packages needed,? for security[;,] (\d+) (?:packages )?available')
+        re_kernel_update = re.compile(r'^Security: kernel-.+ is an installed security update')
         summary_line_found = False
         for line in output:
             _ = re_summary_rhel6.match(line)
@@ -356,6 +388,9 @@ class YumTester(object):
                 number_security_updates = _.group(1)
                 number_total_updates = _.group(2)
                 break
+            _ = re_kernel_update.match(line)
+            if _:
+                end(CRITICAL, "Kernel security update is installed but requires a reboot")
 
         if not summary_line_found:
             end(WARNING, "Cannot find summary line in yum output. " + support_msg)
@@ -389,8 +424,7 @@ class YumTester(object):
 
         if self.all_updates:
             return self.test_all_updates()
-        else:
-            return self.test_security_updates()
+        return self.test_security_updates()
 
 
     def test_all_updates(self):
@@ -410,6 +444,8 @@ class YumTester(object):
                 message = "1 Update Available"
             else:
                 message = "%s Updates Available" % number_updates
+
+        message += " | total_updates_available=%s" % number_updates
 
         return status, message
 
@@ -442,6 +478,8 @@ class YumTester(object):
             else:
                 message += ". %s Non-Security Updates Available" \
                                                         % number_other_updates
+        message += " | security_updates_available=%s non_security_updates_available=%s total_updates_available=%s" \
+                   % (number_security_updates, number_other_updates, number_security_updates + number_other_updates)
 
         return status, message
 
@@ -495,6 +533,12 @@ def main():
                          + "check itself doesn't have to do it, possibly "  \
                          + "speeding up execution (by 1-2 seconds in tests)")
 
+    parser.add_option("-c",
+                      "--config",
+                      dest="yum_config",
+                      help="Run with custom repository config in order to use " \
+                         + "custom repositories in case of special setup for")
+
     parser.add_option("-N",
                       "--no-warn-on-lock",
                       action="store_true",
@@ -518,6 +562,11 @@ def main():
                       dest="repository_to_disable",
                       help="Explicitly disables a repository when calling yum. " \
                          + "Can take a comma separated list of repositories")
+
+    parser.add_option("--disableplugin",
+                      dest="plugin_to_disable",
+                      help="Explicitly disables a plugin when calling yum. " \
+                         + "Can take a comma separated list of plugins")
 
     parser.add_option("-t",
                       "--timeout",
@@ -552,6 +601,8 @@ def main():
     tester.no_warn_on_lock = options.no_warn_on_lock
     tester.enable_repo = options.repository_to_enable
     tester.disable_repo = options.repository_to_disable
+    tester.disable_plugin = options.plugin_to_disable
+    tester.yum_config = options.yum_config
     tester.timeout = options.timeout
     tester.verbosity = options.verbosity
     tester.warn_on_any_update = options.warn_on_any_update

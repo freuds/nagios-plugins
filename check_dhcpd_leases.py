@@ -8,19 +8,19 @@
 #  License: see accompanying LICENSE file
 #
 
-"""Nagios plugin to parse the ISC Dhcp Server lease file and print out a list 
+"""Nagios plugin to parse the ISC Dhcp Server lease file and print out a list
 of all the Name/IP/MAC associations or any combination of the three. Can also
 be used to alert on the delegation of IPs to non-recognized MACs or Hostnames"""
 
 __author__  = "Hari Sekhon"
 __title__   = "Nagios Plugin for DHCPd Server Leases"
-__version__ = 0.8
+__version__ = '0.8.2'
 
-# Due to the limited of characters that Nagios accepts from a plugin, this 
+# Due to the limited of characters that Nagios accepts from a plugin, this
 # output will be cut short if you have a lot of dhcp clients, which is why
 # the -c switch was included to compact the output to fit more in.
 
-# Remember, this program can be used without Nagios so that character limit 
+# Remember, this program can be used without Nagios so that character limit
 # need not be your limit.
 
 import re
@@ -38,11 +38,11 @@ UNKNOWN  = 3
 TIMEOUT  = 30
 
 # Regex for lease comparison and dissection
-RE_BINDING_STATE_ACTIVE = re.compile("\s*binding state active;")
-RE_LEASE                = re.compile("lease")
-RE_HOSTNAME             = re.compile("client-hostname")
-RE_MAC                  = re.compile("hardware\sethernet")
-RE_IP_ADDRESS           = re.compile("(\d{1,3}.){3}\d{1,3}")
+RE_BINDING_STATE_ACTIVE = re.compile(r'\s*binding state active;')
+RE_LEASE                = re.compile(r'lease')
+RE_HOSTNAME             = re.compile(r'client-hostname')
+RE_MAC                  = re.compile(r'hardware\sethernet')
+RE_IP_ADDRESS           = re.compile(r'(\d{1,3}.){3}\d{1,3}')
 
 def end(status, message):
     """Exits the plugin with first arg as the return code and the second
@@ -116,24 +116,24 @@ class DhcpdLeaseTester:
     def validate_variables(self):
         """Validates all variables as defined in self.__init__"""
 
-        if self.compact_output == None:
+        if self.compact_output is None:
             self.compact_output = False
-        if self.host_whitelist == None:
+        if self.host_whitelist is None:
             self.host_whitelist = ""
-        if self.host_blacklist == None:
+        if self.host_blacklist is None:
             self.host_blacklist = ""
-        if self.leasefile == None:
+        if self.leasefile is None:
             end(UNKNOWN, "No leasefile to test")
-        if self.mac_whitelist == None:
+        if self.mac_whitelist is None:
             self.mac_whitelist = ""
-        if self.mac_blacklist == None:
+        if self.mac_blacklist is None:
             self.mac_blacklist = ""
 
-        if self.timeout == None:
+        if self.timeout is None:
             self.timeout = TIMEOUT
 
-        self.validate_normalize_macs("whitelist") 
-        self.validate_normalize_macs("blacklist") 
+        self.validate_normalize_macs("whitelist")
+        self.validate_normalize_macs("blacklist")
 
         try:
             self.timeout = int(self.timeout)
@@ -142,7 +142,7 @@ class DhcpdLeaseTester:
 
 
     def validate_normalize_macs(self, colourlist):
-        """Checks to make sure any Mac addresses given 
+        """Checks to make sure any Mac addresses given
         are in the correct format. Takes either whitelist or blacklist
         and then validates each mac in that list and changes the list
         to a normalized uppercase hex mac with no formatting or
@@ -154,7 +154,7 @@ class DhcpdLeaseTester:
         maclist = [mac.replace(":","") for mac in maclist]
         maclist = [mac.upper() for mac in maclist]
 
-        re_mac_format = re.compile("^([\dA-Fa-f]{2}[:-]?){5}[\dA-Fa-f]{2}$")
+        re_mac_format = re.compile(r'^([\dA-Fa-f]{2}[:-]?){5}[\dA-Fa-f]{2}$')
 
         for mac in maclist:
             if not re_mac_format.match(mac):
@@ -197,7 +197,7 @@ class DhcpdLeaseTester:
 
         self.check_unauthorized_leases()
 
-        if self.unauthorized == True:
+        if self.unauthorized:
             unauthorized_output = self.format_unauthorized_leases()
             output = unauthorized_output + " || " + output
             result = CRITICAL
@@ -249,7 +249,7 @@ class DhcpdLeaseTester:
                     hostname = self.get_hostname()
                     self.address_dict[ip][0] = hostname
 
-                if self.show_mac == True or security_checks_on:
+                if self.show_mac or security_checks_on:
                     mac = self.get_mac()
                     self.address_dict[ip][1] = mac
 
@@ -261,7 +261,7 @@ class DhcpdLeaseTester:
     def check_unauthorized_leases(self):
         """Checks for and call functions to test the leases against the given
         whitelists/blacklists. Returns a list where the first element is a True
-        or False overall result, and the second element is a dictionary of 
+        or False overall result, and the second element is a dictionary of
         offending hosts with 'mac' and 'host' keys representing an array of
         hosts that tripped each type of rule"""
 
@@ -277,7 +277,7 @@ class DhcpdLeaseTester:
         if self.host_blacklist:
             self.check_host_blacklist()
 
-        if len(self.unauthorized_dict) > 0:
+        if self.unauthorized_dict:
             self.unauthorized = True
 
 
@@ -289,7 +289,7 @@ class DhcpdLeaseTester:
         host_whitelist = host_whitelist.split()
         host_whitelist = [host.upper() for host in host_whitelist]
 
-        for ip in self.address_dict.keys():
+        for ip in self.address_dict:
             hostname = self.address_dict[ip][0]
             mac      = self.address_dict[ip][1]
             if hostname.upper() not in host_whitelist:
@@ -341,10 +341,10 @@ class DhcpdLeaseTester:
         """Takes the address dictionary in the form {"ip":("hostname","mac")}
         and formats the output, returns a string."""
 
-        if self.no_name == True:
+        if self.no_name:
             self.sort_by_ip = True
 
-        if self.sort_by_ip == True:
+        if self.sort_by_ip:
             address_keys_sorted = self.address_dict.keys()
             address_keys_sorted.sort()
         else:
@@ -365,7 +365,7 @@ class DhcpdLeaseTester:
                     msg += " - "
             if not self.compact_output:
                 for ip in address_keys_sorted:
-                    if self.no_name == True:
+                    if self.no_name:
                         msg += "%s" % ip
                     else:
                         hostname = self.address_dict[ip][0]
@@ -382,14 +382,14 @@ class DhcpdLeaseTester:
 
 
     def format_unauthorized_leases(self):
-        """Takes the self unauthorized dictionary in the form 
+        """Takes the self unauthorized dictionary in the form
         {"ip":("hostname","mac","offending")}
         and formats the output, returns a string."""
 
-        if self.no_name == True:
+        if self.no_name:
             self.sort_by_ip = True
 
-        if self.sort_by_ip == True:
+        if self.sort_by_ip:
             unauthorized_keys_sorted = self.unauthorized_dict.keys()
             unauthorized_keys_sorted.sort()
         else:
@@ -404,7 +404,7 @@ class DhcpdLeaseTester:
             else:
                 msg = "%s Unauthorized Hosts! " % number_unauthorized
             for ip in unauthorized_keys_sorted:
-                if self.no_name == True:
+                if self.no_name:
                     msg += "%s" % ip
                 else:
                     hostname = self.unauthorized_dict[ip][0]
@@ -442,11 +442,11 @@ class DhcpdLeaseTester:
         # header keywords comment that you usually seen in a dhcpd.leases file
 
         # This isn't really good enough but otherwise it can break across
-        # different systems. Looser than I would like but the user should 
+        # different systems. Looser than I would like but the user should
         # really be using a valid lease file. Parse leases will also catch
         # this in that no leases will be created and the result will be
         # technically true, there are no valid leases in an incorrect file
-        if not re.search("\n\s*lease .+{\s*\n", leases) \
+        if not re.search(r'\n\s*lease .+{\s*\n', leases) \
             and not \
                 re.search("(?i)\n#.*lease[s]? file .* written by.*\n", leases) \
             and not re.search("\n#.*dhcpd.leases.*\n", leases) \
@@ -482,7 +482,7 @@ class DhcpdLeaseTester:
         if not RE_IP_ADDRESS.match(ip):
             ip = "UNKNOWN"
 
-        return ip 
+        return ip
 
 
     def get_hostname(self):
@@ -501,10 +501,10 @@ class DhcpdLeaseTester:
                 else:
                     hostname = "UNKNOWN"
 
-        if hostname == "" or hostname == None:
+        if not hostname:
             hostname = "UNKNOWN"
 
-        return hostname 
+        return hostname
 
 
     def get_mac(self):
@@ -522,7 +522,7 @@ class DhcpdLeaseTester:
                 else:
                     mac = "UNKNOWN"
 
-        if mac == "" or mac == None:
+        if not mac:
             mac = "UNKNOWN"
 
         return mac
@@ -674,7 +674,7 @@ def main():
         parser.print_help()
         sys.exit(UNKNOWN)
 
-    if timeout == None:
+    if timeout is None:
         timeout = TIMEOUT
 
     try:

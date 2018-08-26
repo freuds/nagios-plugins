@@ -21,68 +21,138 @@ cd "$srcdir/.."
 
 . "$srcdir/utils.sh"
 
-echo "
-# ============================================================================ #
-#                                 A l l u x i o
-# ============================================================================ #
-"
+section "A l l u x i o"
 
-export ALLUXIO_VERSIONS="${@:-${ALLUXIO_VERSIONS:-latest 1.0 1.1}}"
+export ALLUXIO_VERSIONS="${@:-${ALLUXIO_VERSIONS:-1.0 1.1 1.2 1.3 1.4 1.5 1.6 latest}}"
 
 ALLUXIO_HOST="${DOCKER_HOST:-${ALLUXIO_HOST:-${HOST:-localhost}}}"
 ALLUXIO_HOST="${ALLUXIO_HOST##*/}"
 ALLUXIO_HOST="${ALLUXIO_HOST%%:*}"
 export ALLUXIO_HOST
 
-export ALLUXIO_MASTER_PORT="${ALLUXIO_MASTER_PORT:-19999}"
-export ALLUXIO_WORKER_PORT="${ALLUXIO_WORKER_PORT:-30000}"
+export ALLUXIO_MASTER_PORT_DEFAULT=19999
+export ALLUXIO_WORKER_PORT_DEFAULT=30000
 
-startupwait 15
+startupwait 50
 
 check_docker_available
 
+trap_debug_env alluxio
+
 test_alluxio(){
     local version="$1"
-    hr
-    echo "Setting up Alluxio $version test container"
-    hr
-    #launch_container "$DOCKER_IMAGE:$version" "$DOCKER_CONTAINER" $ALLUXIO_MASTER_PORT $ALLUXIO_WORKER_PORT
+    section2 "Setting up Alluxio $version test container"
+    docker_compose_pull
+    if [ -z "${KEEPDOCKER:-}" ]; then
+        docker-compose down || :
+    fi
     VERSION="$version" docker-compose up -d
-    alluxio_master_port="`docker-compose port "$DOCKER_SERVICE" "$ALLUXIO_MASTER_PORT" | sed 's/.*://'`"
-    alluxio_worker_port="`docker-compose port "$DOCKER_SERVICE" "$ALLUXIO_WORKER_PORT" | sed 's/.*://'`"
-    local ALLUXIO_MASTER_PORT="$alluxio_master_port"
-    local ALLUXIO_WORKER_PORT="$alluxio_worker_port"
+    hr
+    echo "getting Alluxio dynamic port mappings:"
+    docker_compose_port "Alluxio Master"
+    docker_compose_port "Alluxio Worker"
+    hr
+    when_ports_available "$ALLUXIO_HOST" "$ALLUXIO_MASTER_PORT" "$ALLUXIO_WORKER_PORT"
+    hr
     if [ -n "${NOTESTS:-}" ]; then
         exit 0
     fi
-    when_ports_available "$startupwait" "$ALLUXIO_HOST" "$ALLUXIO_MASTER_PORT" "$ALLUXIO_WORKER_PORT"
     if [ "$version" = "latest" ]; then
-        local version=".*"
+        echo "latest version, fetching latest version from DockerHub master branch"
+        local version="$(dockerhub_latest_version alluxio)"
+        echo "expecting version '$version'"
     fi
     hr
-    echo "retrying for $startupwait secs to give Alluxio time to initialize"
-    for x in `seq $startupwait`; do
-        ./check_alluxio_master_version.py -v -e "$version" && break
-        sleep 1
-    done
-    ./check_alluxio_master_version.py -v -e "$version"
+    echo "waiting on Alluxio Master to give Alluxio time to properly initialize:"
+    RETRY_INTERVAL=2 retry "$startupwait" ./check_alluxio_master_version.py -v -e "$version" -t 2
     hr
-    ./check_alluxio_worker_version.py -v -e "$version"
+    echo "expect Alluxio Worker to also be up by this point:"
+    RETRY_INTERVAL=2 retry 10 ./check_alluxio_worker_version.py -v -e "$version" -t 2
     hr
-    ./check_alluxio_master.py -v
+    run ./check_alluxio_master_version.py -v -e "$version"
+
+    run_fail 2 ./check_alluxio_master_version.py -v -e "fail-version"
+
+    run_conn_refused ./check_alluxio_master_version.py -v -e "$version"
+
+    run ./check_alluxio_worker_version.py -v -e "$version"
+
+    run_fail 2 ./check_alluxio_worker_version.py -v -e "fail-version"
+
+    run_conn_refused ./check_alluxio_worker_version.py -v -e "$version"
+
+    run ./check_alluxio_master.py -v
+
+    run_conn_refused ./check_alluxio_master.py -v
+
+    run ./check_alluxio_worker.py -v
+
+    run_conn_refused ./check_alluxio_worker.py -v
+
+    run ./check_alluxio_running_workers.py -v -w 1
+
+    run_fail 1 ./check_alluxio_running_workers.py -v -w 2
+
+    run_fail 2 ./check_alluxio_running_workers.py -v -w 3 -c 2
+
+    run_conn_refused ./check_alluxio_running_workers.py -v -w 1
+
+    run ./check_alluxio_dead_workers.py -v
+
+    run_conn_refused ./check_alluxio_dead_workers.py -v
+
+    run_fail 3 ./check_alluxio_worker_heartbeat.py -l
+
+    set +e
+    node="$(./check_alluxio_worker_heartbeat.py -l | tail -n1)"
+    set -e
+    if [ -z "$node" ]; then
+        echo "FAILED to find Alluxio worker node"
+        exit 1
+    fi
+    run ./check_alluxio_worker_heartbeat.py --node "$node"
+
+    run_conn_refused ./check_alluxio_worker_heartbeat.py --node "$node"
+
+    if [ -n "${KEEPDOCKER:-}" ]; then
+        echo
+        echo "Completed $run_count Alluxio tests"
+        return
+    fi
+    # there is a bug in Alluxio 1.1 + 1.2 properties support that prevents adding the config for reducing the worker detection timeout to 5 mins
+    # there is a bug in Aluxio 1.3 - 1.5 that it does not respect the worker timeout setting
+    if is_CI || ! [[ "$version" =~ ^1\.[1-5]$ ]]; then
+    echo "Now killing Alluxio worker for dead workers test:"
+    set +e
+    echo docker exec -ti "$DOCKER_CONTAINER" pkill -9 -f WORKER_LOGGER
+    # this doesn't find it, bug, probably too far along the cmd line
+    #docker exec -ti "$DOCKER_CONTAINER" pkill -9 -f alluxio.worker.AlluxioWorker
+    # latches on to WORKER_LOGGER earlier in cmd line, works - do not try using just "worker" as that will match and kill the tail that keeps the container up
+    docker exec -ti "$DOCKER_CONTAINER" pkill -9 -f WORKER_LOGGER
+    set -e
     hr
-    #docker exec -ti "$DOCKER_CONTAINER" ps -ef
-    ./check_alluxio_worker.py -v
+    echo "Now waiting for dead worker to be detected by master:"
+    # takes 300 secs to detect by default, but docker image config sets this down to a more reasonable 10 secs like Tachyon used to do
+    retry 310 ! ./check_alluxio_dead_workers.py -v
     hr
-    ./check_alluxio_running_workers.py -v
+    run_fail 1 ./check_alluxio_dead_workers.py -v
+
+    run_fail 2 ./check_alluxio_dead_workers.py -v -c 0
+
+    run_fail 1 ./check_alluxio_running_workers.py -v -w 1 -c 0
+
+    run_fail 2 ./check_alluxio_running_workers.py -v -w 1
+
+    run_fail 1 ./check_alluxio_worker_heartbeat.py --node "$node" -w 1
+
+    run_fail 2 ./check_alluxio_worker_heartbeat.py --node "$node" -w 1 -c 1
+
+    fi
+    echo "Completed $run_count Alluxio tests"
     hr
-    ./check_alluxio_dead_workers.py -v
-    hr
-    #delete_container
+    [ -n "${KEEPDOCKER:-}" ] ||
     docker-compose down
     echo
 }
 
-for version in $(ci_sample $ALLUXIO_VERSIONS); do
-    test_alluxio $version
-done
+run_test_versions Alluxio

@@ -21,7 +21,7 @@ Checks:
 4. Subject Alternative Names supported by certificate (optional)
 5. SNI - Server Name Identification - supply hostname identifier for servers that contain multiple certificates to tell the server which SSL certificate to use (optional)";
 
-$VERSION = "0.9.12";
+$VERSION = "0.9.14";
 
 use warnings;
 use strict;
@@ -68,7 +68,7 @@ my @output;
     "c|critical=s"                  => [ \$critical,            "The critical threshold in days before expiry (defaults to $default_critical)" ],
     "C|CApath=s"                    => [ \$CApath,              "Path to ssl root certs dir (will attempt to determine from openssl binary if not supplied)" ],
     "N|no-validate"                 => [ \$no_validate,         "Do not validate the SSL certificate chain" ],
-    "cert-domain-invalid"	    => [ \$cert_domain_invalid, "Do not check that the domain on the returned certicate is valid according to domain naming rules. This was added for Platfora which had 'localhost' as the domain name. An alternative is to add 'localhost' to lib/custom_tlds.txt" ]
+    "cert-domain-invalid"           => [ \$cert_domain_invalid, "Do not check that the domain on the returned certicate is valid according to domain naming rules. This was added for Platfora which had 'localhost' as the domain name. An alternative is to add 'localhost' to lib/custom_tlds.txt" ]
 );
 @usage_order = qw/host port domain subject-alternative-names SNI-hostname warning critical CApath no-validate cert-domain-invalid/;
 
@@ -103,6 +103,18 @@ set_timeout($timeout, sub { pkill("$openssl s_client -connect $host:$port", "-9"
 
 $openssl = which($openssl, 1);
 
+# OpenSSL 1.0 / 1.1 on Ubuntu Trust 14.04 / Debian 9 Stetch shows /usr/lib/ssl/ but in fact requires /usr/lib/ssl/certs/, which caused
+# cert validation failure if using the inferred path location as newer OpenSSL appears to no longer recurse for CA certs, see:
+#
+# https://github.com/HariSekhon/nagios-plugins/issues/163
+#
+# Originally commented this block out to leave openssl to use its default location and only use -CApath if the user has specifically requested changing the path
+#
+# However it turns out that openssl 1.0 on Ubuntu Trusty 14.04 does not infer the cert path properly and results in:
+#
+# CRITICAL: Certificate validation failed, returned 20 (unable to get local issuer certificate)
+#
+# so re-enabled now and added specific handling for this case to append /certs/ to the CApath when this otherwise pointing to only /usr/lib/ssl
 unless(defined($CApath)){
     @output = cmd("$openssl version -a");
     foreach(@output){
@@ -115,6 +127,9 @@ unless(defined($CApath)){
     unless(defined($CApath)){
         usage "CApath to root certs was not specified and could not be found from openssl binary";
     }
+    if($CApath eq "/usr/lib/ssl"){
+        $CApath = "$CApath/certs/";
+    }
     $CApath = validate_dir($CApath, "CA path");
 }
 
@@ -123,7 +138,8 @@ vlog2;
 $status = "OK";
 
 vlog2 "* checking validity of cert (chain of trust)";
-$cmd = "echo | $openssl s_client -connect $host:$port -CApath $CApath";
+$cmd = "echo | $openssl s_client -connect $host:$port";
+$cmd .= " -CApath $CApath" if $CApath;
 $cmd .= " -servername $sni_hostname" if $sni_hostname;
 $cmd .= " 2>&1";
 
@@ -179,7 +195,7 @@ foreach (@output){
     }
     #elsif (/subject=/) {
     # The * must be in there for wildcard certs
-    elsif (/Subject:(?:.+,)?\s*CN=([\*\w\.-]+)/) {
+    elsif (/Subject:(?:.+,)?\s*CN\s*=\s*([\*\w\.-]+)/) {
         $domain = $1;
         #defined($domain) || quit "CRITICAL", "failed to determine certificate domain name";
         last;
@@ -244,7 +260,7 @@ if(!is_critical){
         critical;
         $days_left = abs($days_left);
         $msg .= "Certificate EXPIRED $days_left day$plural ago for '$domain'. Expiry Date: '$end_date'";
-    } else { 
+    } else {
         $msg .= "$days_left day$plural remaining for '$domain'. Certificate Expires: '$end_date'";
         check_thresholds($days_left);
     }

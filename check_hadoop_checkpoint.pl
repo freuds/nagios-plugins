@@ -13,13 +13,13 @@
 #  License: see accompanying LICENSE file
 #
 
-$DESCRIPTION = "Nagios Plugin to check Hadoop HDFS last checkpoint lag via NameNode JMX
+$DESCRIPTION = "Nagios Plugin to check Hadoop HDFS last checkpoint lag via NameNode JMX API
 
 Tests time since last HDFS checkpoint against warning/critical thresholds in seconds
 
-Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0.2.1.1.0-385) and Apache Hadoop 2.5.2, 2.6.4, 2.7.2";
+Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0) and Apache Hadoop 2.4, 2.5, 2.6, 2.7, 2.8";
 
-$VERSION = "0.1";
+$VERSION = "0.3";
 
 use strict;
 use warnings;
@@ -27,7 +27,7 @@ BEGIN {
     use File::Basename;
     use lib dirname(__FILE__) . "/lib";
 }
-use HariSekhonUtils;
+use HariSekhonUtils qw/:DEFAULT :time/;
 use Data::Dumper;
 use JSON::XS;
 use LWP::Simple '$ua';
@@ -46,8 +46,8 @@ env_creds(["HADOOP_NAMENODE", "HADOOP"], "Hadoop NameNode");
 
 get_options();
 
-$host       = validate_host($host);
-$port       = validate_port($port);
+$host = validate_host($host);
+$port = validate_port($port);
 validate_thresholds(1, 1, { "simple" => "upper", "positive" => 1, "integer" => 1});
 
 vlog2;
@@ -55,7 +55,7 @@ set_timeout();
 
 $status = "OK";
 
-my $url = "http://$host:$port/jmx";
+my $url = "http://$host:$port/jmx?qry=Hadoop:service=NameNode,name=FSNamesystem";
 
 my $content = curl $url;
 
@@ -74,7 +74,7 @@ my $last_checkpoint;
 foreach(@beans){
     next unless get_field2($_, "name") eq "Hadoop:service=NameNode,name=FSNamesystem";
     $found_mbean = 1;
-    $last_checkpoint = get_field2($_, "LastCheckpointTime");
+    $last_checkpoint = get_field2_int($_, "LastCheckpointTime");
     last;
 }
 quit "UNKNOWN", "failed to find namenode's FSNamesystem mbean" unless $found_mbean;
@@ -84,7 +84,7 @@ if($lag < 0){
     unknown;
     $msg .= "HDFS last checkpoint is in the future!! Check NTP between hosts. ";
 }
-$msg .= "HDFS last checkpoint $lag secs ago";
+$msg .= sprintf("HDFS last checkpoint %s ago [%s secs]", sec2human($lag), $lag);
 check_thresholds($lag);
 $msg .= " | 'lag since last checkpoint'=${lag}s";
 msg_perf_thresholds();

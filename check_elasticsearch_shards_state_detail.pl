@@ -2,7 +2,7 @@
 # nagios: -epn
 #
 #  Author: Hari Sekhon
-#  Date: 2013-06-03 21:43:25 +0100 (Mon, 03 Jun 2013) 
+#  Date: 2013-06-03 21:43:25 +0100 (Mon, 03 Jun 2013)
 #
 #  https://github.com/harisekhon/nagios-plugins
 #
@@ -11,9 +11,9 @@
 
 $DESCRIPTION = "Nagios Plugin to check the state of Elasticsearch shards not in started state, especially for unassigned shards
 
-Tested on Elasticsearch 1.4.0 and 1.4.4, 1.4.5, 1.5.2, 1.6.2, 1.7.5, 2.0.2, 2.2.2, 2.3.3, 2.4.1, 5.0.0";
+Tested on Elasticsearch 1.3, 1.4, 1.5, 1.6, 1.7, 2.0, 2.1, 2.2, 2.3, 2.4, 5.0, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.0, 6.1, 6.2";
 
-$VERSION = "0.3.2";
+$VERSION = "0.4.0";
 
 use strict;
 use warnings;
@@ -28,6 +28,8 @@ $ua->agent("Hari Sekhon $progname version $main::VERSION");
 
 %options = (
     %hostoptions,
+    %useroptions,
+    %ssloptions,
     %elasticsearch_index,
     %multilineoption,
 );
@@ -38,6 +40,10 @@ get_options();
 
 $host  = validate_host($host);
 $port  = validate_port($port);
+if($password){
+    $user = validate_user($user);
+    $password = validate_password($password);
+}
 $index = validate_elasticsearch_index($index) if defined($index);
 
 vlog2;
@@ -89,7 +95,7 @@ if(grep { "STARTED" ne $_ } @states){
     foreach(@states){
         if($_ eq "STARTING" or $_ eq "INITIALIZING"){
             warning;
-        } else { 
+        } else {
             critical;
         }
     }

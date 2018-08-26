@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   nginx:
     extends:
@@ -21,3 +21,8 @@ services:
     image: nginx:${VERSION:-latest}
     ports:
       - 80
+    networks:
+      - nginx
+
+networks:
+  nginx:

@@ -2,7 +2,7 @@
 #
 #  Author: Hari Sekhon
 #  Date: 2008-02-28 14:49:50 +0000 (Thu, 28 Feb 2008)
-# 
+#
 #  http://github.com/harisekhon/nagios-plugins
 #
 #  License: see accompanying LICENSE file
@@ -14,14 +14,14 @@
 import os
 import sys
 import time
+from optparse import OptionParser
 import lib_nagios as nagios
 from lib_nagios import NagiosTester, which, end
 from lib_nagios import OK, WARNING, CRITICAL, UNKNOWN, DEFAULT_TIMEOUT
-from optparse import OptionParser
 
 __author__      = "Hari Sekhon"
 __title__       = "Nagios Plugin for VNC"
-__version__     = 0.6
+__version__     = '0.6.1'
 
 nagios.CHECK_NAME = "VNC"
 # The standard VNC port
@@ -55,7 +55,7 @@ class VncTester(NagiosTester):
 #    def validate_port(self):
 #        """Exits with an error if the port is not valid"""
 #
-#        if self.port == None:
+#        if not self.port:
 #            self.port = ""
 #        else:
 #            try:
@@ -71,7 +71,7 @@ class VncTester(NagiosTester):
         """Exits with an error if the passwd file is not given
         or if the file is non-existent or cannot be accessed for any reason"""
 
-        if self.passwdfile == None or self.passwdfile == "":
+        if not self.passwdfile:
             end(UNKNOWN, "You must supply a passwd file containing " \
                        + "the VNC password in order to connect. See --help " \
                        + "for details")
@@ -103,7 +103,7 @@ class VncTester(NagiosTester):
         result, output = self.run(cmd)
 
         if result == 0:
-            if len(output) == 0:
+            if not output:
                 return (WARNING, "Test passed but no output was received " \
                                + "from vncsnapshot program, abnormal "     \
                                + "condition, please check.")
@@ -117,7 +117,7 @@ class VncTester(NagiosTester):
                 else:
                     return (OK, msg)
         else:
-            if len(output) == 0:
+            if not output:
                 return (CRITICAL, "Connection failed. " \
                                 + "There was no output from vncsnapshot")
             else:

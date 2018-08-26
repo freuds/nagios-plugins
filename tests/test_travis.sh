@@ -21,64 +21,52 @@ cd "$srcdir/..";
 
 . ./tests/utils.sh
 
-echo "
-# ============================================================================ #
-#                               T r a v i s   C I
-# ============================================================================ #
-"
+section "T r a v i s   C I"
 
-set +e
-./check_travis_ci_last_build.py -r HariSekhon/nagios-plugins
-check_exit_code 0 2
-hr
-echo "check warning threshold to induces failure"
-./check_travis_ci_last_build.py -r HariSekhon/nagios-plugins -v -w 10
-check_exit_code 1 2
-hr
-echo "check critical threshold to induces failure"
-./check_travis_ci_last_build.py -r HariSekhon/nagios-plugins -v -c 10
-check_exit_code 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/tools
-check_exit_code 0 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/spotify-tools
-check_exit_code 0 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/pytools
-check_exit_code 0 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/pylib
-check_exit_code 0 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/lib
-check_exit_code 0 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/lib-java
-check_exit_code 0 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/nagios-plugin-kafka
-check_exit_code 0 2
-hr
-./check_travis_ci_last_build.py -r HariSekhon/spark-apps
-check_exit_code 0 2
-hr
-echo "checking no builds returned"
-./check_travis_ci_last_build.py -r harisekhon/nagios-plugins -v
-check_exit_code 3
-hr
-echo "checking wrong repo name/format"
-./check_travis_ci_last_build.py -r test -v
-check_exit_code 3
-hr
-./check_travis_ci_last_build.py -r harisekhon/ -v
-check_exit_code 3
-hr
-./check_travis_ci_last_build.py -r /nagios-plugins -v
-check_exit_code 3
-hr
-echo "checking nonexistent repo"
-./check_travis_ci_last_build.py -r nonexistent/repo -v
-check_exit_code 3
-hr
-echo; echo
+# this repo should always be working
+run ./check_travis_ci_last_build.py -r HariSekhon/bash-tools
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/nagios-plugins
+
+echo "check warning threshold to induce failure as builds should always take longer than 10 secs:"
+run_fail "1 2" ./check_travis_ci_last_build.py -r HariSekhon/nagios-plugins -v -w 10
+
+echo "check critical threshold to induce failure as builds should always take longer than 10 secs:"
+run_fail 2 ./check_travis_ci_last_build.py -r HariSekhon/nagios-plugins -v -c 10
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/devops-perl-tools
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/spotify-tools
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/devops-python-tools
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/pylib
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/lib
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/lib-java
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/nagios-plugin-kafka
+
+run_fail "0 2" ./check_travis_ci_last_build.py -r HariSekhon/spark-apps
+
+echo "checking no builds returned:"
+run_fail 3 ./check_travis_ci_last_build.py -r harisekhon/nagios-plugins -v
+
+echo "checking wrong repo name/format:"
+run_usage ./check_travis_ci_last_build.py -r test -v
+
+run_usage ./check_travis_ci_last_build.py -r harisekhon/ -v
+
+run_usage ./check_travis_ci_last_build.py -r /nagios-plugins -v
+
+run_usage ./check_travis_ci_last_build.py -r tools -v
+
+echo "checking nonexistent repo:"
+run_fail 3 ./check_travis_ci_last_build.py -r nonexistent/repo -v
+
+echo "Completed $run_count Travis CI tests"
+echo
+echo "All Travis CI tests passed successfully"
+echo
+echo

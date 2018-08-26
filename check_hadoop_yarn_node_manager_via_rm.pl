@@ -22,7 +22,7 @@ See also:
 
 Specifying --node-id results in a more efficient query of the Resource Manager. Use this instead of --node for large clusters otherwise it ends up enumerating all the node managers.
 
-Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0.2.1.1.0-385) and Apache Hadoop 2.5.2, 2.6.4, 2.7.2";
+Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0) and Apache Hadoop 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8";
 
 $VERSION = "0.2";
 
@@ -167,7 +167,7 @@ $healthReport = "<blank>" unless $healthReport;
 
 if($state eq "RUNNING"){
     $state = "running";
-} else { 
+} else {
     critical;
 }
 $msg = "node $node state = '$state', healthReport = '$healthReport', $lag secs since last health report";

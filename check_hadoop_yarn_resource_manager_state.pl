@@ -11,9 +11,9 @@
 
 $DESCRIPTION = "Nagios Plugin to check the state of the Hadoop Yarn Resource Manager via REST API
 
-Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0.2.1.1.0-385) and Apache Hadoop 2.5.2, 2.6.4, 2.7.2";
+Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0) and Apache Hadoop 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8";
 
-$VERSION = "0.1";
+$VERSION = "0.2";
 
 use strict;
 use warnings;
@@ -74,6 +74,6 @@ if($state eq "STARTED"){
     critical;
 }
 
-$msg = "yarn resource manager state: $state, started on: $started, version: $rm_version";
+$msg = "Hadoop Yarn Resource Manager state = $state, started on: $started, version: $rm_version";
 
 quit $status, $msg;

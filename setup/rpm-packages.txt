@@ -13,30 +13,35 @@
 #                            RPM Package Requirements
 # ============================================================================ #
 
+perl
+python
+python-pip
+python-setuptools
+
 epel-release
-wget
-gcc
-gcc-c++
-perl-CPAN
 perl-libwww-perl
+perl-DBD-MySQL
 tar
+wget
 which
+
+# needed to fetch the library submodule at end of build
+# and also for check_git_checkout_branch.pl and Git-Python / check_git_checkout_branch.py
+# only available on EPEL in CentOS 5
+git
 
 # ethtool for ./check_linux_interface.pl
 ethtool
+net-tools
 
-# to build DBD::mysql if building from CPAN
-mysql-devel
-perl-DBD-MySQL
+# used for tests
+curl
+
+# for ping mode of find_active_server.py
+iputils
 
 # for check_ssl_cert.pl
 openssl
-
-# needed to build Net::SSLeay for IO::Socket::SSL for Net::LDAPS
-openssl-devel
-
-# for XML::Simple building
-expat-devel
 
 # for ndg-httpsclient
 python-pyasn1
@@ -44,26 +49,17 @@ python-pyasn1
 # for check_whois.pl
 jwhois
 
-# only available on EPEL in CentOS 5
-git
-python-setuptools
-python-pip
-python-devel
+python-jenkins
 
 # for Cassandra's Python driver
 #libev
 #libev-devel
 #snappy-devel
 
-# needed for ndg-httpsclient upgrade
-libffi-devel
-
-# needed to build pyhs2
-# libgsasl-devel saslwrapper-devel
-
-# breaks on CentOS 7.0 on Docker, fakesystemd conflicts with systemd, 7.2 works though
-#cyrus-sasl-devel
-
 # for check_yum.pl / check_yum.py
+# one of these will be missing, handled in Makefile instead
 #yum-security
 #yum-plugin-security
+
+# for timezone checks
+tzdata

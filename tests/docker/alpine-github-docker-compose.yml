@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   alpine-github:
     extends:
@@ -20,3 +20,9 @@ services:
       service: common
     image: harisekhon/alpine-github:${VERSION:-latest}
     command: tail -f /dev/null
+    networks:
+      - alpine_github
+    privileged: true
+
+networks:
+  alpine_github:

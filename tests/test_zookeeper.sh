@@ -21,74 +21,90 @@ cd "$srcdir/..";
 
 . ./tests/utils.sh
 
-echo "
-# ============================================================================ #
-#                           Z o o K e e p e r
-# ============================================================================ #
-"
+section "Z o o K e e p e r"
 
-export ZOOKEEPER_VERSIONS="${@:-${ZOOKEEPER_VERSIONS:-latest 3.3 3.4}}"
+export ZOOKEEPER_VERSIONS="${@:-${ZOOKEEPER_VERSIONS:-3.3 3.4 latest}}"
 
 ZOOKEEPER_HOST="${DOCKER_HOST:-${ZOOKEEPER_HOST:-${HOST:-localhost}}}"
 ZOOKEEPER_HOST="${ZOOKEEPER_HOST##*/}"
 ZOOKEEPER_HOST="${ZOOKEEPER_HOST%%:*}"
 export ZOOKEEPER_HOST
-export ZOOKEEPER_PORT=2181
-export ZOOKEEPER_PORTS="$ZOOKEEPER_PORT 3181 4181"
+export ZOOKEEPER_PORT_DEFAULT=2181
+export HAPROXY_PORT_DEFAULT=2181
+#export ZOOKEEPER_PORTS="$ZOOKEEPER_PORT_DEFAULT 3181 4181"
 
-export MNTDIR="/pl"
+export DOCKER_MOUNT_DIR="/pl"
 
 check_docker_available
 
-docker_exec(){
-    docker-compose exec "$DOCKER_SERVICE" $MNTDIR/$@
-}
+trap_debug_env zookeeper
 
 startupwait 10
 
 test_zookeeper(){
     local version="$1"
-    echo "Setting up ZooKeeper $version test container"
-    #launch_container "$DOCKER_IMAGE:$version" "$DOCKER_CONTAINER" $ZOOKEEPER_PORTS
-    #docker cp "$DOCKER_CONTAINER":/zookeeper/conf/zoo.cfg .
-    #hr
-    #echo "Setting up nagios-plugins test container with zkperl library"
-    #local DOCKER_OPTS="--link $DOCKER_CONTAINER:zookeeper -v $PWD:$MNTDIR"
-    #local DOCKER_CMD="tail -f /dev/null"
-    #launch_container "$DOCKER_IMAGE2" "$DOCKER_CONTAINER2"
-    #docker cp zoo.cfg "$DOCKER_CONTAINER2":"$MNTDIR/"
+    section2 "Setting up ZooKeeper $version test container"
+    docker_compose_pull
     VERSION="$version" docker-compose up -d
-    zookeeper_port="`docker-compose port "$DOCKER_SERVICE" "$ZOOKEEPER_PORT" | sed 's/.*://'`"
-    #local ZOOKEEPER_PORT="$zookeeper_port"
-    #local DOCKER_CONTAINER="$(docker-compose ps | sed -n '3s/ .*/p')"
-    when_ports_available "$startupwait" "$ZOOKEEPER_HOST" "$zookeeper_port"
+    hr
+    echo "getting ZooKeeper dynammic port mapping:"
+    docker_compose_port "ZooKeeper"
+    DOCKER_SERVICE=zookeeper-haproxy docker_compose_port HAProxy
+    hr
+    when_ports_available "$ZOOKEEPER_HOST" "$ZOOKEEPER_PORT" "$HAPROXY_PORT"
+    hr
     if [ -n "${NOTESTS:-}" ]; then
         exit 0
     fi
     expected_version="$version"
     if [ "$expected_version" = "latest" ]; then
-        expected_version=".*"
+        echo "latest version, fetching latest version from DockerHub master branch"
+        local expected_version="$(dockerhub_latest_version zookeeper-dev)"
+        echo "expecting version '$expected_version'"
     fi
-    hr
-    ./check_zookeeper_version.py -P "$zookeeper_port" -e "$expected_version"
-    hr
-    if [ "${version:0:3}" = "3.3" ]; then
-        $perl -T ./check_zookeeper.pl -P "$zookeeper_port" -s -w 50 -c 100 -v || :
-    else
-        $perl -T ./check_zookeeper.pl -P "$zookeeper_port" -s -w 50 -c 100 -v
-    fi
-    hr
-    docker_exec check_zookeeper_config.pl -H localhost -P $ZOOKEEPER_PORT -C "/zookeeper/conf/zoo.cfg" -v
-    hr
-    docker_exec check_zookeeper_child_znodes.pl -H localhost -P $ZOOKEEPER_PORT -z / --no-ephemeral-check -v
-    hr
-    docker_exec check_zookeeper_znode.pl -H localhost -P $ZOOKEEPER_PORT -z / -v -n --child-znodes
     hr
 
-    #delete_container "$DOCKER_CONTAINER"
+    run ./check_zookeeper_version.py -e "$expected_version"
+
+    run_fail 2 ./check_zookeeper_version.py -e "fail-version"
+
+    run_conn_refused ./check_zookeeper_version.py -e "$expected_version"
+
+    zookeeper_tests
+
+    docker_exec check_zookeeper_child_znodes.pl -H localhost -z / --no-ephemeral-check -v
+
+    echo "checking connection refused:"
+    ERRCODE=2 docker_exec check_zookeeper_child_znodes.pl -H localhost -z / --no-ephemeral-check -v -P "$wrong_port"
+
+    docker_exec check_zookeeper_znode.pl -H localhost -z / -v -n --child-znodes
+
+    echo "checking connection refused:"
+    ERRCODE=2 docker_exec check_zookeeper_znode.pl -H localhost -z / -v -n --child-znodes -P "$wrong_port"
+    echo
+    section2 "Now checking HAProxy ZooKeeper checks:"
+    ZOOKEEPER_PORT="$HAPROXY_PORT" \
+    zookeeper_tests
+
+    echo "Completed $run_count ZooKeeper tests"
+    hr
+    [ -n "${KEEPDOCKER:-}" ] ||
     docker-compose down
 }
 
-for version in $(ci_sample $ZOOKEEPER_VERSIONS); do
-    test_zookeeper $version
-done
+zookeeper_tests(){
+    if [ "${version:0:3}" = "3.3" ]; then
+        run_fail 3 $perl -T ./check_zookeeper.pl -s -w 50 -c 100 -v
+    else
+        run $perl -T ./check_zookeeper.pl -s -w 50 -c 100 -v
+    fi
+
+    run_conn_refused $perl -T ./check_zookeeper.pl -s -w 50 -c 100 -v
+
+    docker_exec check_zookeeper_config.pl -H localhost -C "/zookeeper/conf/zoo.cfg" -v
+
+    echo "checking connection refused:"
+    ERRCODE=2 docker_exec check_zookeeper_config.pl -H localhost -C "/zookeeper/conf/zoo.cfg" -v -P "$wrong_port"
+}
+
+run_test_versions ZooKeeper

@@ -11,11 +11,11 @@
 
 $DESCRIPTION = "Nagios Plugin to check Hadoop HDFS Space % used via NameNode JMX
 
-See also check_hadoop_dfs.pl for an older implementation that parses dfsadmin output.
+See also check_hadoop_hdfs_space.py for a Python version or check_hadoop_dfs.pl for an older implementation that parses dfsadmin output.
 
-Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0.2.1.1.0-385) and Apache Hadoop 2.5.2, 2.6.4, 2.7.2";
+Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0) and Apache Hadoop 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8";
 
-$VERSION = "0.1";
+$VERSION = "0.3";
 
 use strict;
 use warnings;
@@ -42,8 +42,8 @@ env_creds(["HADOOP_NAMENODE", "HADOOP"], "Hadoop NameNode");
 
 get_options();
 
-$host       = validate_host($host);
-$port       = validate_port($port);
+$host = validate_host($host);
+$port = validate_port($port);
 validate_thresholds(1, 1, { "simple" => "upper", "positive" => 1, "integer" => 1, "min" => 0, "max" => 100});
 
 vlog2;
@@ -51,7 +51,7 @@ set_timeout();
 
 $status = "OK";
 
-my $url = "http://$host:$port/jmx";
+my $url = "http://$host:$port/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo";
 
 my $content = curl $url;
 
@@ -74,7 +74,13 @@ my $total;
 foreach(@beans){
     next unless get_field2($_, "name") eq "Hadoop:service=NameNode,name=NameNodeInfo";
     $found_mbean = 1;
-    $pc_used = get_field2_float($_, "PercentUsed");
+    $pc_used = get_field2($_, "PercentUsed");
+    if($pc_used =~ /^\d\.\d+e-\d+$/){
+        $pc_used = 0;
+    }
+    if(! isFloat($pc_used)){
+        quit "UNKNOWN", "PercentUsed is not a float! $nagios_plugins_support_msg";
+    }
     $files   = get_field2_int($_, "TotalFiles");
     $blocks  = get_field2_int($_, "TotalBlocks");
     $used    = get_field2_int($_, "Used");

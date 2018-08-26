@@ -7,7 +7,7 @@
 #  https://github.com/harisekhon/nagios-plugins
 #
 #  License: see accompanying LICENSE file
-#  
+#
 
 $DESCRIPTION = "Nagios Plugin to fetch Cassandra's thread pool stats per node by parsing 'nodetool tpstats'.
 
@@ -18,9 +18,9 @@ Also returns Active and Dropped operations with perfdata for graphing.
 
 Can specify a remote host and port otherwise it checks the local node's stats (for calling over NRPE on each Cassandra node)
 
-Tested on Cassandra 1.2.9, 2.0.1, 2.0.9, 2.2.5, 3.0.8, 3.5, 3.6, 3.7";
+Tested on Cassandra 1.2, 2.0, 2.1, 2.2, 3.0, 3.5, 3.6, 3.7, 3.9, 3.10, 3.11";
 
-$VERSION = "0.7.1";
+$VERSION = "0.7.2";
 
 use strict;
 use warnings;
@@ -82,6 +82,11 @@ foreach(; $i < scalar @output; $i++){
 foreach(; $i < scalar @output; $i++){
     next if $output[$i] =~ /^\s*$/;
     last;
+}
+
+my $format_changed_err = "unrecognized line '%s', nodetool output format may have changed, aborting. ";
+sub die_format_changed($){
+    quit "UNKNOWN", sprintf("$format_changed_err$nagios_plugins_support_msg", $_[0]);
 }
 
 $output[$i] =~ /^Message type\s+Dropped/ or die_format_changed($output[$i]);

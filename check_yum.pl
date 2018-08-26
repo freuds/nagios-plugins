@@ -21,7 +21,7 @@ See also: check_yum.py (the original, also part of the Advanced Nagios Plugins C
 Tested on CentOS 5 / 6 / 7
 ";
 
-$VERSION = "0.2";
+$VERSION = "0.7.5";
 
 use strict;
 use warnings;
@@ -32,8 +32,13 @@ BEGIN {
 use HariSekhonUtils;
 
 set_timeout_max(3600);
+set_timeout_default(30);
 
 my $YUM = "/usr/bin/yum";
+
+# workaround to avoid foreign locale parsing, from:
+# https://github.com/HariSekhon/nagios-plugins/issues/155
+$ENV{"LANG"} = "en_US";
 
 my $all_updates;
 my $warn_on_any_update;
@@ -41,6 +46,7 @@ my $cache_only;
 my $no_warn_on_lock;
 my $enablerepo;
 my $disablerepo;
+my $disableplugin;
 
 %options = (
     "A|all-updates"         =>  [ \$all_updates,        "Does not distinguish between security and non-security updates, but returns critical for any available update. This may be used if the yum security plugin is absent or you want to maintain every single package at the latest version. You may want to use --warn-on-any-update instead of this option" ],
@@ -49,9 +55,10 @@ my $disablerepo;
     "N|no-warn-on-lock"     => [ \$no_warn_on_lock,     "Return OK instead of WARNING when yum is locked and fails to check for updates due to another instance running. This is not recommended from the security standpoint, but may be wanted to reduce the number of alerts that may intermittently pop up when someone is running yum for package management" ],
     "e|enablerepo=s"        => [ \$enablerepo,          "Explicitly enables  a repository when calling yum. Can take a comma separated list of repositories" ],
     "d|disablerepo=s"       => [ \$disablerepo,         "Explicitly disables a repository when calling yum. Can take a comma separated list of repositories" ],
+    "disableplugin=s"       => [ \$disableplugin,       "Explicitly disables a plugin when calling yum. Can take a comma separated list of plugins" ],
 );
 
-@usage_order = qw/all-updates warn-on-any-update cache-only no-warn-on-lock enablerepo disablerepo/;
+@usage_order = qw/all-updates warn-on-any-update cache-only no-warn-on-lock enablerepo disablerepo disableplugin/;
 
 get_options();
 
@@ -75,6 +82,13 @@ if($enablerepo){
 if($disablerepo){
     foreach(split(",", $disablerepo)){
         $opts .= " --disablerepo=" . validate_reponame($_);
+    }
+}
+if($disableplugin){
+    $disableplugin =~ /^([A-Za-z0-9,-]+)$/ or usage "invalid argument passed to --disableplugin, must be alphanumeric with dashes and comma separated for multiple plugins";
+    $disableplugin = $1;
+    foreach(split(",", $disableplugin)){
+        $opts .= " --disableplugin=$disableplugin";
     }
 }
 
@@ -120,7 +134,7 @@ sub check_all_updates(){
     } else {
         critical;
         plural $number_updates;
-        $msg = "$number_updates Yum Update$plural Available | yum_updates_available=$number_updates";
+        $msg = "$number_updates Yum Update$plural Available | total_updates_available=$number_updates";
     }
 }
 
@@ -138,14 +152,14 @@ sub check_security_updates(){
         warning if $warn_on_any_update;
     }
     plural $number_other_updates;
-    $msg .= ", $number_other_updates Non-Security Update$plural Available | security_updates_available=$number_security_updates non_security_updates_available=$number_other_updates yum_updates_available=" . ($number_security_updates + $number_other_updates);
+    $msg .= ", $number_other_updates Non-Security Update$plural Available | security_updates_available=$number_security_updates non_security_updates_available=$number_other_updates total_updates_available=" . ($number_security_updates + $number_other_updates);
 }
 
 
 sub get_security_updates(){
     my ($result, @output) = cmd("$YUM $opts --security check-update", 0, 0, "get_returncode");
+    #open my $fh, "test_input.txt"; @output = split("\n", do { local $/ = <$fh>});
     check_yum_returncode($result, @output);
-    my $summary_line_found = 0;
     my $number_security_updates;
     my $number_total_updates;
     foreach(@output){
@@ -157,9 +171,18 @@ sub get_security_updates(){
             $number_security_updates = $1;
             $number_total_updates    = $2;
             last;
+        } elsif(/(\d+) package\(s\) needed for security, out of (\d+) available/){
+            $number_security_updates = $1;
+            $number_total_updates    = $2;
+            last;
+        } elsif(/^Security: kernel-.+ is an installed security update/){
+            quit "CRITICAL", "Kernel security update is installed but requires a reboot";
+        } elsif(/^Security: kernel-+ is the currently running version/){
+            next;
         }
     }
-    defined($number_security_updates) and defined($number_total_updates) or quit "UNKNOWN", "failed to determine the number of security & total updates. Format may have changed. $nagios_plugins_support_msg";
+    defined($number_security_updates) or quit "UNKNOWN", "failed to determine the number of security updates. Format may have changed. $nagios_plugins_support_msg";
+    defined($number_total_updates)    or quit "UNKNOWN", "failed to determine the number of total updates. Format may have changed. $nagios_plugins_support_msg";
     my $number_other_updates = $number_total_updates - $number_security_updates;
     my @package_output = grep { $_ !~ / from .+ excluded / } @output;
     if(scalar(@package_output) > $number_total_updates + 25){
@@ -171,26 +194,48 @@ sub get_security_updates(){
 
 sub get_all_updates(){
     my ($result, @output) = cmd("$YUM $opts check-update", 0, 0, "get_returncode");
+    #open my $fh, "test_input.txt"; @output = split("\n", do { local $/ = <$fh>});
     check_yum_returncode($result, @output);
-    my @output2 = split("\n\n", join("\n", @output));
+    my @output2 = grep { $_ } split("\n\n", join("\n", @output));
     my $number_packages;
     foreach(@output2){
         vlog3 "Section:\n$_\n";
     }
-    if(scalar(@output2) > 2 or scalar(@output2) < 2 or $output2[1] =~ /Setting up repositories/ or $output2[1] =~ /Loaded plugins: /){
-        quit "UNKNOWN", "Yum output signature does not match current known format. Output format may have changed. $nagios_plugins_support_msg";
-    }
     if(scalar @output2 == 1){
         $number_packages = 0;
+    } elsif(scalar @output2 == 2){
+        if($output2[1] =~ /Setting up repositories/ or $output2[1] =~ /Loaded plugins: /){
+            quit "UNKNOWN", "Yum output signature does not match current known format. Output format may have changed. $nagios_plugins_support_msg";
+        }
+        my @tmp = split("\n", $output2[1]);
+        foreach my $line (@tmp){
+            my @line_parts = split(/\s+/, $line);
+            if(scalar @line_parts > 1 and
+               $line !~ /^\s/o and
+               $line !~ /Obsoleting Packages/o){
+                $number_packages += 1;
+            }
+        }
     } else {
-        # avoid warning 'Use of implicit split to @_ is deprecated at check_yum.pl line 172.'
-        my @packages = split("\n", $output2[1]);
-        $number_packages = scalar @packages;
+        quit "UNKNOWN", "Yum output signature does not match current known format. Output format may have changed. $nagios_plugins_support_msg";
     }
 
     # Extra layer of checks. This is a security plugin so it's preferable to fail with an error rather than pass silently leaving you with an insecure system
     my $count = 0;
+    my $obsoleting_packages = 0;
     foreach(@output){
+        next if / excluded /;
+        next if $obsoleting_packages and /^\s/;
+        if(/Obsoleting Packages/){
+            $obsoleting_packages = 1;
+            next;
+        }
+        if(/^Security: kernel-.+ is an installed security update/){
+            quit "WARNING", "Kernel security update is installed but requires a reboot";
+        }
+        if(/^Security: kernel-+ is the currently running version/){
+            next;
+        }
         $count++ if /^.+\.(i[3456]86|x86_64|noarch)\s+.+\s+.+$/;
     }
     if($count != $number_packages){

@@ -24,65 +24,70 @@ cd "$srcdir2/..";
 # because including bash-tools/util.sh resets the srcdir
 srcdir="$srcdir2"
 
-echo "
-# ============================================================================ #
-#                                   N g i n x
-# ============================================================================ #
-"
+section "N g i n x"
 
-export NGINX_VERSIONS="${@:-${NGINX_VERSIONS:-latest 1.10 1.11.0}}"
+export NGINX_VERSIONS="${@:-${NGINX_VERSIONS:-1.10 1.11.0 latest}}"
 
 NGINX_HOST="${DOCKER_HOST:-${NGINX_HOST:-${HOST:-localhost}}}"
 NGINX_HOST="${NGINX_HOST##*/}"
 NGINX_HOST="${NGINX_HOST%%:*}"
 export NGINX_HOST
 
-export NGINX_PORT="80"
+export NGINX_PORT_DEFAULT="80"
 
-export DOCKER_IMAGE="nginx"
-export DOCKER_CONTAINER="nagios-plugins-nginx-test"
+startupwait 5
 
-startupwait 1
-is_CI && let startupwait+=4
+check_docker_available
 
-if ! is_docker_available; then
-    echo 'WARNING: Docker not found, skipping Nginx checks!!!'
-    exit 0
-fi
-
-trap_container
+trap_debug_env nginx
 
 test_nginx(){
     local version="$1"
-    echo "Setting up Nginx $version test container"
-    if ! is_docker_container_running "$DOCKER_CONTAINER"; then
-        docker rm -f "$DOCKER_CONTAINER" &>/dev/null || :
-        echo "Starting Docker Nginx test container"
-        docker create --name "$DOCKER_CONTAINER" -p $NGINX_PORT:$NGINX_PORT "$DOCKER_IMAGE:$version"
-        docker cp "$srcdir/conf/nginx/conf.d/default.conf" "$DOCKER_CONTAINER":/etc/nginx/conf.d/default.conf
-        docker start "$DOCKER_CONTAINER"
-        when_ports_available $startupwait $NGINX_HOST $NGINX_PORT
-    else
-        echo "Docker Nginx test container already running"
-    fi
+    section2 "Setting up Nginx $version test container"
+    # docker-compose up to create docker_default network, otherwise just doing create and then start results in error:
+    # ERROR: for nginx  Cannot start service nginx: network docker_default not found
+    # ensure we start fresh otherwise the first nginx stats stub failure test will fail as it finds the old stub config
+    VERSION="$version" docker-compose down || :
+    docker_compose_pull
+    VERSION="$version" docker-compose up -d
+    hr
+    # Configure Nginx stats stub so watch_nginx_stats.pl now passes
+    VERSION="$version" docker-compose stop
+    hr
+    echo "Now reconfiguring Nginx to support stats and restarting:"
+    docker cp "$srcdir/conf/nginx/conf.d/default.conf" "$DOCKER_CONTAINER":/etc/nginx/conf.d/default.conf
+    VERSION="$version" docker-compose start
+    hr
+    echo "getting Nginx dynamic port mapping:"
+    docker_compose_port Nginx
+    hr
+    when_ports_available "$NGINX_HOST" "$NGINX_PORT"
+    hr
     if [ -n "${NOTESTS:-}" ]; then
         exit 0
     fi
     if [ "$version" = "latest" ]; then
         local version=".*"
     fi
+
+    run ./check_nginx_version.py -e "$version"
+
+    run_fail 2 ./check_nginx_version.py -e "fail-version"
+
+    run_conn_refused ./check_nginx_version.py -e "$version"
+
+    run $perl -T ./check_nginx_stats.pl -u /status
+
+    run_fail 2 $perl -T ./check_nginx_stats.pl -u /nonexistent
+
+    run_conn_refused $perl -T ./check_nginx_stats.pl -u /status
+
+    echo "Completed $run_count Nginx tests"
     hr
-    ./check_nginx_version.py -e "$version"
-    hr
-    $perl -T ./check_nginx_stats.pl -H "$NGINX_HOST" -u /status
-    hr
-    delete_container
+    [ -n "${KEEPDOCKER:-}" ] ||
+    docker-compose down
     hr
     echo
 }
 
-for version in $(ci_sample $NGINX_VERSIONS); do
-    test_nginx $version
-done
-
-untrap
+run_test_versions Nginx

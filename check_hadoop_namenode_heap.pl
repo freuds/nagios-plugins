@@ -9,11 +9,11 @@
 #  License: see accompanying LICENSE file
 #
 
-$DESCRIPTION = "Nagios Plugin to check Hadoop NameNode Heap/Non-Heap Used % via JMX
+$DESCRIPTION = "Nagios Plugin to check Hadoop NameNode Heap/Non-Heap Used % via JMX API
 
-Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0.2.1.1.0-385) and Apache Hadoop 2.5.2, 2.6.4, 2.7.2";
+Tested on Hortonworks HDP 2.1 (Hadoop 2.4.0) and Apache Hadoop 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8";
 
-$VERSION = "0.1";
+$VERSION = "0.3";
 
 use strict;
 use warnings;
@@ -55,7 +55,7 @@ set_timeout();
 
 $status = "OK";
 
-my $url = "http://$host:$port/jmx";
+my $url = "http://$host:$port/jmx?qry=java.lang:type=Memory";
 
 my $content = curl $url;
 
@@ -65,7 +65,7 @@ try{
 catch{
     quit "invalid json returned by NameNode at '$url'";
 };
-vlog3(Dumper($json));
+#vlog3(Dumper($json));
 
 my @beans = get_field_array("beans");
 
@@ -80,12 +80,24 @@ if($non_heap){
 foreach(@beans){
     next unless get_field2($_, "name") eq "java.lang:type=Memory";
     $found_mbean = 1;
-    my $max     = get_field2_int($_, "${Non}HeapMemoryUsage.max");
+    my $max     = get_field2($_, "${Non}HeapMemoryUsage.max");
+    if(not isInt($max, 1)){
+        quit "UNKNOWN", "non-integer returned for ${Non}HeapMemoryUsage.max! $nagios_plugins_support_msg"
+    }
     my $used    = get_field2_int($_, "${Non}HeapMemoryUsage.used");
-    my $used_pc = sprintf("%.2f", $used / $max * 100);
-
+    my $used_pc;
+    if($max < 0){
+        $max = 0;
+        $used_pc = "N/A";
+    } else {
+        $used_pc = sprintf("%.2f", $used / $max * 100);
+    }
     $msg = sprintf("%s%% ${non}heap used (%s/%s)", $used_pc, human_units($used), human_units($max));
-    check_thresholds($used_pc);
+    if(isFloat($used_pc)){
+        check_thresholds($used_pc);
+    } else {
+        $used_pc = 0;
+    }
     $msg .= sprintf(" | '${non}heap used %%'=%s%%", $used_pc);
     msg_perf_thresholds();
     $msg .= sprintf(" '${non}heap used'=%sb '${non}heap max'=%sb '${non}heap committed'=%sb", $used, $max, get_field2_int($_, "${Non}HeapMemoryUsage.committed"));

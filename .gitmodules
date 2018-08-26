@@ -1,10 +1,15 @@
 [submodule "lib"]
 	path = lib
 	url = https://github.com/harisekhon/lib
+	branch = master
 [submodule "pylib"]
 	path = pylib
 	url = https://github.com/harisekhon/pylib
+	branch = master
 [submodule "bash-tools"]
 	path = bash-tools
 	url = https://github.com/harisekhon/bash-tools
 	branch = master
+[submodule "haproxy-configs"]
+	path = haproxy-configs
+	url = https://github.com/harisekhon/haproxy-configs

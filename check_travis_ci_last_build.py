@@ -18,8 +18,13 @@
 
 Nagios Plugin to check Travis CI last build status for a given repository via the Travis API
 
-Shows status as PASSED/FAILED for last finished build along with build number, duration in seconds
-with optional --warning/--critical thresholds and build start and finished date & time.
+Checks for the last finished build:
+
+- status = PASSED/FAILED
+- build number (integer)
+- build duration in seconds
+  - optional --warning / --critical thresholds for build duration
+- build start and finished date & time.
 
 Perfdata is output for build time for the last finished build and number of current builds in progress.
 
@@ -37,27 +42,23 @@ import logging
 import os
 import sys
 import traceback
-try:
-    import requests
-except ImportError:
-    print(traceback.format_exc(), end='')
-    sys.exit(4)
 srcdir = os.path.abspath(os.path.dirname(__file__))
 libdir = os.path.join(srcdir, 'pylib')
 sys.path.append(libdir)
 try:
     # pylint: disable=wrong-import-position
     from harisekhon.utils import log
-    from harisekhon.utils import CriticalError, UnknownError
+    from harisekhon.utils import UnknownError
     from harisekhon.utils import validate_chars, jsonpp
     from harisekhon.utils import isInt, qquit, plural, support_msg_api
     from harisekhon import NagiosPlugin
+    from harisekhon import RequestHandler
 except ImportError as _:
     print(traceback.format_exc(), end='')
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.4'
+__version__ = '0.6.0'
 
 
 class CheckTravisCILastBuild(NagiosPlugin):
@@ -72,8 +73,9 @@ class CheckTravisCILastBuild(NagiosPlugin):
         self.builds_in_progress = 0
 
     def add_options(self):
-        self.add_opt('-r', '--repo',
-                     help="Travis repo (case sensitive, in form of 'user/repo' eg. 'HariSekhon/nagios-plugins')")
+        self.add_opt('-r', '--repo', default=os.getenv('TRAVIS_REPO'),
+                     help="Travis repo ($TRAVIS_REPO, 'user/repo' eg. 'HariSekhon/nagios-plugins'" + \
+                          ", this is case sensitive due to the Travis API)")
         self.add_thresholds()
 
     def process_args(self):
@@ -89,20 +91,13 @@ class CheckTravisCILastBuild(NagiosPlugin):
 
     def run(self):
         url = 'https://api.travis-ci.org/repos/{repo}/builds'.format(repo=self.repo)
-        log.debug('GET %s', url)
-        try:
-            req = requests.get(url)
-        except requests.exceptions.RequestException as _:
-            raise CriticalError(_)
-        log.debug("response: %s %s", req.status_code, req.reason)
-        log.debug("content:\n%s\n%s\n%s", '='*80, req.content.strip(), '='*80)
-        if req.status_code != 200:
-            raise CriticalError("%s %s" % (req.status_code, req.reason))
+        request_handler = RequestHandler()
+        req = request_handler.get(url)
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("\n{0}".format(jsonpp(req.content)))
+            log.debug("\n%s", jsonpp(req.content))
         try:
             self.parse_results(req.content)
-        except (KeyError, ValueError) as _:
+        except (KeyError, ValueError):
             exception = traceback.format_exc().split('\n')[-2]
             # this covers up the traceback info and makes it harder to debug
             #raise UnknownError('failed to parse expected json response from Travis CI API: {0}'.format(exception))
@@ -121,16 +116,32 @@ class CheckTravisCILastBuild(NagiosPlugin):
                   + " in returning latest builds information"
                  )
         # get latest finished build
+        last_build_number = None
         for _ in builds:
+            # API returns most recent build first so just take the first one that is completed
+            # extra check to make sure we're getting the very latest build number and API hasn't changed
+            build_number = _['number']
+            if not isInt(build_number):
+                raise UnknownError('build number returned is not an integer!')
+            build_number = int(build_number)
+            if last_build_number is None:
+                last_build_number = int(build_number) + 1
+            if build_number >= last_build_number:
+                raise UnknownError('build number returned is out of sequence, cannot be >= last build returned' + \
+                                   '{0}'.format(support_msg_api()))
+            last_build_number = build_number
             if _['state'] == 'finished':
                 if build is None:
                     build = _
+                    # don't break as we want to count builds in progress
+                    # and also check the build numbers keep descending so we have the first latest build
+                    #break
             else:
                 self.builds_in_progress += 1
         if build is None:
             qquit('UNKNOWN', 'no recent builds finished yet')
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("latest build:\n{0}".format(jsonpp(build)))
+            log.debug("latest build:\n%s", jsonpp(build))
         return build
 
     def parse_results(self, content):

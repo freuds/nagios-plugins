@@ -21,7 +21,7 @@ Nagios Plugin to check the deployed version of ZooKeeper matches what's expected
 This is also used in the accompanying test suite to ensure we're checking the right version of ZooKeeper
 and to avoid the check_zookeeper.pl which needs mntr not available in ZooKeeper 3.3
 
-Tested on ZooKeeper 3.3.6, 3.4.8
+Tested on ZooKeeper 3.3.6, 3.4.8, 3.4.11
 
 """
 
@@ -47,11 +47,10 @@ except ImportError as _:
     sys.exit(4)
 
 __author__ = 'Hari Sekhon'
-__version__ = '0.2.1'
+__version__ = '0.3.1'
+
 
 # pylint: disable=too-few-public-methods
-
-
 class CheckZooKeeperVersion(VersionNagiosPlugin):
 
     def __init__(self):
@@ -70,11 +69,11 @@ class CheckZooKeeperVersion(VersionNagiosPlugin):
             conn.sendall('envi')
             data = conn.recv(1024)
             conn.close()
-        except socket.error as _:
+        except (socket.error, socket.timeout) as _:
             qquit('CRITICAL', "Failed to connect to ZooKeeper at '{host}:{port}': "\
                               .format(host=self.host, port=self.port) + str(_))
         version = None
-        log.debug(data.strip())
+        log.debug('%s', data.strip())
         for line in data.split('\n'):
             _ = self.version_line_regex.match(line)
             if _:

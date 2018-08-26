@@ -9,6 +9,8 @@
 #  License: see accompanying LICENSE file
 #
 
+# XXX: switch to % of corrupt / under-replicated blocks like Cloudera Manager 90c 95 warning
+
 # TODO: node list checks
 # TODO: list dead datanodes
 
@@ -19,16 +21,26 @@ $DESCRIPTION = "Nagios Hadoop Plugin to check various health aspects of HDFS via
 - checks HDFS % Used Balance is within thresholds
 - checks number of available datanodes and if there are any dead datanodes
 
-Originally written for old vanilla Apache Hadoop 0.20.x, updated for CDH 4.3 (Apache 2.0.0), CDH 5.0 (Apache 2.3.0), HDP 2.1 (Apache 2.4.0), HDP 2.2 (Apache 2.6.0), and Apache Hadoop 2.5.2, 2.6.4, 2.7.2
+Originally written for old vanilla Apache Hadoop 0.20.x, updated and tested on:
 
-Recommend you also investigate check_hadoop_cloudera_manager_metrics.pl (disclaimer I work for Cloudera but seriously it's good it gives you access to a wealth of information)";
+CDH 4.3 (Hadoop 2.0.0)
+CDH 5.0 (Hadoop 2.3.0)
+HDP 2.1 (Hadoop 2.4.0)
+HDP 2.2 (Hadoop 2.6.0)
+Apache Hadoop 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9
+
+See also check_hadoop_jmx.pl which can report Missing and Corrupt blocks, but be aware that the calculation mechanism between JMX and dfsadmin differ, see this ticket:
+
+    https://issues.apache.org/jira/browse/HDFS-8533
+
+Recommend you also investigate check_hadoop_cloudera_manager_metrics.pl (disclaimer I used to work for Cloudera but seriously it's good it gives you access to a wealth of information)";
 
 # TODO:
 # Features to add: (these are my old colleague Rob Dawson's idea from his check_hadoop_node_status.pl plugin)
 # 1. Min Configured Capacity per node (from node section output).
 # 2. Last Contact: convert the date to secs and check against thresholds.
 
-$VERSION = "0.7.7";
+$VERSION = "0.9.1";
 
 use strict;
 use warnings;
@@ -165,8 +177,8 @@ foreach(@output){
     } elsif(/^DFS Used:\s*(\d+)\s+\((.+)\)\s*$/i){
         $dfs{"dfs_used"}        = $1;
         $dfs{"dfs_used_human"}  = $2;
-    } elsif(/^DFS Used\%:\s*(\d+(?:\.\d+)?)\%\s*$/i){
-        $dfs{"dfs_used_pc"}            = $1;
+    } elsif(/^DFS Used\%:\s*(\d+(?:\.\d+)?|NaN)\%\s*$/i){
+        $dfs{"dfs_used_pc"} = $1;
     } elsif(/^Under replicated blocks:\s*(\d+)\s*$/i){
         $dfs{"under_replicated_blocks"} = $1;
     } elsif(/^Blocks with corrupt replicas:\s*(\d+)\s*$/i){
@@ -184,9 +196,9 @@ foreach(@output){
         $dfs{"datanodes_available"} = $1;
     } elsif(/Dead\s+datanodes\s+\((\d+)\)/){
         $dfs{"datanodes_dead"} = $1;
-    # Dead datanodes summary is below Live nodes list in recent versions
-    #} elsif(/^Name:/){
-    #    last;
+        last;
+    } elsif(/^Name:/){
+        last;
     #} else {
     #    quit "UNKNOWN", "Unrecognized line in output while parsing totals: '$_'. $nagios_plugins_support_msg_api";
     }
@@ -224,6 +236,8 @@ if($balance){
             next;
         } elsif(/Dead datanodes(?: \(\d+\))?:/){
             last;
+        } elsif(/Last Block Report: /){
+            next;
         } else {
             quit "UNKNOWN", "Unrecognized line in output while parsing nodes: '$_'. $nagios_plugins_support_msg_api";
         }
@@ -256,15 +270,20 @@ check_parsed(qw/
         under_replicated_blocks
         corrupt_blocks
         missing_blocks
-        datanodes_available
         /);
+        #datanodes_available
         #datanodes_total
         #datanodes_dead
 #############
+unless(defined($dfs{"datanodes_available"})){
+    # safety check
+    grep(/\bavailable\b/i, @output) and quit "CRITICAL", "'available' word detected in output but available datanode count was not parsed. $nagios_plugins_support_msg";
+    $dfs{"datanodes_available"} = 0;
+}
 # Apache 2.6.0 no longer outputs datanodes total or datanodes dead - must assume 0 dead datanodes if we can't find dead in output
 unless(defined($dfs{"datanodes_dead"})){
     # safety check
-    grep(/\bdead\b/i, @output) and quit "CRITICAL", "dead detected in output but dead datanode count not parsed. $nagios_plugins_support_msg"; 
+    grep(/\bdead\b/i, @output) and quit "CRITICAL", "'dead' word detected in output but dead datanode count was not parsed. $nagios_plugins_support_msg";
     # must be Apache 2.6+ with no dead datanodes
     $dfs{"datanodes_dead"} = 0;
 }
@@ -279,9 +298,22 @@ $msg    = "NO TESTS DONE!!! Please choose something to test";
 
 if($hdfs_space){
     $status = "OK"; # ok unless check_thresholds says otherwise
+    # happens when there are no datanodes online
+    if($dfs{"dfs_used_pc"} eq "NaN"){
+        unknown();
+        $msg = sprintf("N/A%% HDFS space used");
+        # reset for graphing in case it breaks on non-numeric
+        $dfs{"dfs_used_pc"} = 0;
+    } else {
+        $msg = sprintf("%.2f%% HDFS space used", $dfs{"dfs_used_pc"});
+        check_thresholds($dfs{"dfs_used_pc"});
+    }
     plural $dfs{"datanodes_available"};
-    $msg = sprintf("%.2f%% HDFS space used on %d available datanode$plural", $dfs{"dfs_used_pc"}, $dfs{"datanodes_available"});
-    check_thresholds($dfs{"dfs_used_pc"});
+    $msg .= sprintf(" on %d available datanode$plural", $dfs{"datanodes_available"});
+    if($dfs{"datanodes_available"} < 1){
+        warning();
+        $msg .= " (< 1)";
+    }
     $msg .= " | 'HDFS Space Used'=$dfs{dfs_used_pc}%;$thresholds{warning}{upper};$thresholds{critical}{upper} 'HDFS Used Capacity'=$dfs{dfs_used}B;;0;$dfs{configured_capacity} 'HDFS Present Capacity'=$dfs{present_capacity}B 'HDFS Configured Capacity'=$dfs{configured_capacity}B 'Datanodes Available'=$dfs{datanodes_available}";
 } elsif($replication){
     $status = "OK";
@@ -308,17 +340,28 @@ if($hdfs_space){
     #my $largest_datanode_used_pc_diff = $max_datanode_used_pc_diff > $min_datanode_used_pc_diff ? $max_datanode_used_pc_diff : $min_datanode_used_pc_diff;
     # switching to allow collection of datanodes which are out of balance
     my $largest_datanode_used_pc_diff = -1;
+    my $num_datanodes = scalar keys %datanodes;
+    if($num_datanodes < 1){
+        $largest_datanode_used_pc_diff = 0;
+    }
     foreach(keys %datanodes){
         $datanodes_imbalance{$_} = abs($dfs{"dfs_used_pc"} - $datanodes{$_}{"used_pc"});
         $largest_datanode_used_pc_diff = $datanodes_imbalance{$_} if($datanodes_imbalance{$_} > $largest_datanode_used_pc_diff);
     }
-    ( $largest_datanode_used_pc_diff >= 0 ) or code_error "largest_datanode_used_pc_diff is less than 0, this is not possible";
+    ( $largest_datanode_used_pc_diff >= 0 ) or code_error "largest_datanode_used_pc_diff is '$largest_datanode_used_pc_diff', cannot be less than 0, this is not possible";
     $largest_datanode_used_pc_diff = sprintf("%.2f", $largest_datanode_used_pc_diff);
     $status = "OK";
-    plural scalar keys %datanodes;
-    $msg = sprintf("%.2f%% HDFS imbalance on space used %% across %d datanode$plural", $largest_datanode_used_pc_diff, scalar keys %datanodes);
+    $msg = sprintf("%.2f%% HDFS imbalance on space used %%", $largest_datanode_used_pc_diff);
     check_thresholds($largest_datanode_used_pc_diff);
-    if($verbose and (is_warning or is_critical)){
+    plural $num_datanodes;
+    $msg .= sprintf(" across %d datanode$plural", $num_datanodes);
+    if($num_datanodes < 1){
+        warning();
+        $msg .= " (< 1)";
+    }
+    if($verbose and
+       $num_datanodes > 0 and
+       (is_warning or is_critical)){
         my $msg2 = " [imbalanced nodes: ";
         foreach(sort keys %datanodes_imbalance){
             if($datanodes_imbalance{$_} >= $thresholds{"warning"}{"upper"}){

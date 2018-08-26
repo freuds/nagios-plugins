@@ -2,7 +2,7 @@
 #
 #  Author: Hari Sekhon
 #  Date: 2008-02-28 14:49:50 +0000 (Thu, 28 Feb 2008)
-# 
+#
 #  http://github.com/harisekhon/nagios-plugins
 #
 #  License: see accompanying LICENSE file
@@ -13,14 +13,14 @@
 
 import sys
 import time
+from optparse import OptionParser
 import lib_nagios as nagios
 from lib_nagios import NagiosTester, which, end
 from lib_nagios import OK, WARNING, CRITICAL, UNKNOWN, DEFAULT_TIMEOUT
-from optparse import OptionParser
 
 __author__      = "Hari Sekhon"
 __title__       = "Nagios Plugin for Subversion"
-__version__     = 0.6
+__version__     = '0.6.1'
 
 nagios.CHECK_NAME = "SVN"
 
@@ -61,7 +61,7 @@ class SvnTester(NagiosTester):
         if self.http and self.https:
             end(UNKNOWN, "cannot choose both http and https, they are " \
                        + "mutually exclusive")
-        elif self.http:    
+        elif self.http:
             self.protocol = "http"
         elif self.https:
             self.protocol = "https"
@@ -72,7 +72,7 @@ class SvnTester(NagiosTester):
     def validate_port(self):
         """Exits with an error if the port is not valid"""
 
-        if self.port == None:
+        if self.port is None:
             self.port = ""
         else:
             try:
@@ -87,12 +87,12 @@ class SvnTester(NagiosTester):
     def generate_uri(self):
         """Creates the uri and returns it as a string"""
 
-        if self.port == "" or self.port == None:
+        if not self.port:
             port = ""
         else:
             port = ":" + str(self.port)
 
-        if self.directory == None:
+        if self.directory is None:
             directory = ""
         else:
             directory = "/" + str(self.directory).lstrip("/")
@@ -126,28 +126,25 @@ class SvnTester(NagiosTester):
         result, output = self.run(cmd)
 
         if result == 0:
-            if len(output) == 0:
+            if not output:
                 return (WARNING, "Test passed but no output was received " \
                                + "from svn program, abnormal condition, "  \
                                + "please check.")
-            else:
-                if self.verbosity >= 1:
-                    return (OK, "svn repository online - directory listing: " \
-                              + "%s" % output.replace("\n", " ").strip())
-                else:
-                    return (OK, "svn repository online - " \
-                              + "directory listing successful")
+            if self.verbosity >= 1:
+                return (OK, "svn repository online - directory listing: " \
+                          + "%s" % output.replace("\n", " ").strip())
+            return (OK, "svn repository online - " \
+                      + "directory listing successful")
         else:
-            if len(output) == 0:
+            if not output:
                 return (CRITICAL, "Connection failed. " \
                                 + "There was no output from svn")
-            else:
-                if output == "svn: Can't get password\n":
-                    output = "password required to access this repository but" \
-                           + " none was given or cached"
-                output = output.lstrip("svn: ")
-                return (CRITICAL, "Error connecting to svn server - %s " \
-                                        % output.replace("\n", " ").rstrip(" "))
+            if output == "svn: Can't get password\n":
+                output = "password required to access this repository but" \
+                       + " none was given or cached"
+            output = output.lstrip("svn: ")
+            return (CRITICAL, "Error connecting to svn server - %s " \
+                                    % output.replace("\n", " ").rstrip(" "))
 
 
 def main():
@@ -207,7 +204,7 @@ def main():
     parser.add_option( "-l",
                        "--label",
                        dest="service",
-                       help="Change result prefix (Defaults to \"%s\")" 
+                       help="Change result prefix (Defaults to \"%s\")"
                                                   % nagios.CHECK_NAME)
 
     parser.add_option( "-t",

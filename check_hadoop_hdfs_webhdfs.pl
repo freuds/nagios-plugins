@@ -7,7 +7,7 @@
 #  https://github.com/harisekhon/nagios-plugins
 #
 #  License: see accompanying LICENSE file
-#  
+#
 
 our $DESCRIPTION = "Nagios Plugin to check HDFS files/directories or writable via WebHDFS API or HttpFS server
 
@@ -25,14 +25,14 @@ Checks:
 
 OR
 
-- HDFS writable - writes a small unique canary file to hdfs:///tmp to check that HDFS is fully available and not in Safe mode (implies enough DataNodes have checked in after startup to achieve 99.9% block availability by default). Deletes the canary file as part of the test to avoid build up of small files. However, if the operation times out on read back or delete then small files will be left in HDFS /tmp, so you should run a periodic cleanup of those (see hadoop_hdfs_retention_policy.pl in https://github.com/harisekhon/tools).
+- HDFS writable - writes a small unique canary file to hdfs:///tmp to check that HDFS is fully available and not in Safe mode (implies enough DataNodes have checked in after startup to achieve 99.9% block availability by default). Deletes the canary file as part of the test to avoid build up of small files. However, if the operation times out on read back or delete then small files will be left in HDFS /tmp, so you should run a periodic cleanup of those (see hadoop_hdfs_retention_policy.pl in https://github.com/harisekhon/devops-perl-tools).
 
 Supports Kerberos authentication but must have a valid kerberos ticket and must use the FQDN of the server, not an IP address and not a short name, otherwise you will get a \"401 Authentication required\" error.
 
-Tested on CDH 4.5, HDP 2.2, Apache Hadoop 2.5.2, 2.6.2, 2.7.2
+Tested on CDH 4.5, HDP 2.2, Apache Hadoop 2.3, 2.4, 2.5, 2.6, 2.7, 2.8
 ";
 
-$VERSION = "0.5.3";
+$VERSION = "0.5.4";
 
 use strict;
 use warnings;
@@ -142,7 +142,7 @@ if($write){
         $file_checks{$_} and usage "cannot specify file checks with --write";
     }
 } else {
-    $path = validate_filename($path, "path");
+    $path = validate_dirname($path, "path");
 
     if($file_checks{"zero"} and $file_checks{"size"}){
         usage "--zero and --size are mutually exclusive";
@@ -215,7 +215,7 @@ sub check_response($){
                 foreach(my $i = 0; $i < scalar @hosts; $i++){
                     unless(grep { $_ eq $hosts[$i] } @attempted_namenodes){
                         $namenode_index = $i;
-                        push(@attempted_namenodes, $hosts[$namenode_index]); 
+                        push(@attempted_namenodes, $hosts[$namenode_index]);
                     }
                 }
                 vlog2 "got Standby NameNode exception, failing over to other NameNode $hosts[$namenode_index]\n";

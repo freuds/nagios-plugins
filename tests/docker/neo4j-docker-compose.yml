@@ -12,7 +12,7 @@
 #  https://www.linkedin.com/in/harisekhon
 #
 
-version: '2.1'
+version: '2.2'
 services:
   neo4j:
     extends:
@@ -22,5 +22,12 @@ services:
     ports:
       - 7473
       - 7474
+      # web UI fails with this bolt:// port
+      - 7687:7687
     environment:
-      - NEO4J_AUTH=none
+      - NEO4J_AUTH=${NEO4J_AUTH:-none}
+    networks:
+      - neo4j
+
+networks:
+  neo4j:

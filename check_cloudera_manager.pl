@@ -23,7 +23,7 @@ You may need to upgrade to Cloudera Manager 4.6 for the Standard Edition (free) 
 
 This is still using v1 of the API for compatability purposes
 
-Tested on Cloudera Manager 4.8.2, 5.0.0, 5.7.0";
+Tested on Cloudera Manager 4.8.2, 5.0.0, 5.7.0, 5.12.0";
 
 $VERSION = "0.2";
 
@@ -76,7 +76,7 @@ if($list_users){
     cm_query();
     check_cm_field("items");
     $msg = "users: ";
-    foreach(@{$json->{"items"}}){ 
+    foreach(@{$json->{"items"}}){
         foreach my $field (qw/name roles/){
             defined($_->{$field}) or quit "CRITICAL", "$field field not found in returned user items returned from '$url_prefix'. $nagios_plugins_support_msg_api";
         }
